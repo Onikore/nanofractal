@@ -44,7 +44,8 @@ class ArucoDetector:
         return DetectionResult(ids=ids, corners=corners)
 
     def estimate_pose(self, corners: np.ndarray, camera_matrix: np.ndarray,
-                      dist_coeffs: np.ndarray, marker_size: float):
+                      dist_coeffs: np.ndarray,
+                      marker_size: float) -> tuple[np.ndarray, np.ndarray]:
         """Per-marker pose (rvecs, tvecs) of shape (N,3) float64 via solvePnP IPPE.
 
         corners: (N,4,2) as returned by detect().

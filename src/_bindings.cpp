@@ -51,7 +51,11 @@ struct ArucoDetectorImpl {
             throw nb::value_error("corners must be float32 (N,4,2)");
         if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
             throw nb::value_error("camera_matrix must be float64 (3,3)");
+        if (dist.ndim() != 1)
+            throw nb::value_error("dist_coeffs must be 1-D float64");
         size_t n = corners.shape(0);
+        // const_cast is safe: solvePnP only reads camera/dist, and the facade
+        // passes freshly-made contiguous arrays (no aliasing with outputs).
         cv::Mat camMat(3, 3, CV_64F, const_cast<double *>(cam.data()));
         cv::Mat distMat((int)dist.shape(0), 1, CV_64F,
                         const_cast<double *>(dist.data()));

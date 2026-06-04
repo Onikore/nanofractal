@@ -80,3 +80,4 @@ def test_estimate_pose_empty_input():
     rvecs, tvecs = det.estimate_pose(empty, cam, dist, marker_size=0.05)
     assert rvecs.shape == (0, 3)
     assert tvecs.shape == (0, 3)
+    assert rvecs.dtype == np.float64 and tvecs.dtype == np.float64
