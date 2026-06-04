@@ -19,3 +19,6 @@ minimum-version = "0.10"
 build-dir = "build/{wheel_tag}"
 wheel.packages = ["src/nanofractal"]
 cmake.build-type = "Release"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

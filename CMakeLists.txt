@@ -3,9 +3,7 @@ project(nanofractal LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
-endif()
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
 
@@ -26,7 +24,19 @@ target_include_directories(_nanofractal PRIVATE
   "${CMAKE_SOURCE_DIR}/src"
   ${OpenCV_INCLUDE_DIRS})
 target_link_libraries(_nanofractal PRIVATE ${OpenCV_LIBS})
-target_compile_options(_nanofractal PRIVATE -O3)
+
+# Release already implies -O3 on GCC/Clang; keep it explicit but MSVC-safe.
+target_compile_options(_nanofractal PRIVATE
+  $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O3>)
+
+# Single source of truth for the version: injected by scikit-build-core from
+# pyproject.toml. Falls back for non-skbuild direct cmake builds.
+if(DEFINED SKBUILD_PROJECT_VERSION)
+  set(_NF_VERSION "${SKBUILD_PROJECT_VERSION}")
+else()
+  set(_NF_VERSION "0.0.0")
+endif()
+target_compile_definitions(_nanofractal PRIVATE NF_VERSION="${_NF_VERSION}")
 
 include(CheckIPOSupported)
 check_ipo_supported(RESULT _ipo_ok OUTPUT _ipo_msg)

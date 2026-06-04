@@ -5,6 +5,6 @@
 namespace nb = nanobind;
 
 NB_MODULE(_nanofractal, m) {
-    m.attr("__version__") = "0.1.0";
+    m.attr("__version__") = NF_VERSION;
     m.def("_opencv_version", []() { return std::string(cv::getVersionString()); });
 }
