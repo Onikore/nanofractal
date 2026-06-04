@@ -57,4 +57,21 @@ class ArucoDetector:
                                      float(marker_size))
 
 
-__all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector"]
+_FRACTAL_CONFIGS = {"FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"}
+
+
+class FractalDetector:
+    def __init__(self, config: str, marker_size: float = -1.0) -> None:
+        if config not in _FRACTAL_CONFIGS:
+            raise ValueError(
+                f"invalid config {config!r}; use one of {sorted(_FRACTAL_CONFIGS)}")
+        self.config = config
+        self._d = _nf.FractalDetector(config, float(marker_size))
+
+    def detect(self, image: np.ndarray) -> DetectionResult:
+        ids, corners = self._d.detect(image)
+        return DetectionResult(ids=ids, corners=corners)
+
+
+__all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector",
+           "FractalDetector"]

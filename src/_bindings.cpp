@@ -1,9 +1,12 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <opencv2/core.hpp>
+#include <opencv2/features2d.hpp>  // FastFeatureDetector, used by nanofractal.h
+#include <memory>
 #include "ndarray_cv.hpp"
 #include "aruco_nano_v6.h"
 #include "aruco_dicts.hpp"
+#include "nanofractal.h"
 
 namespace nb = nanobind;
 
@@ -80,6 +83,65 @@ struct ArucoDetectorImpl {
     }
 };
 
+// ---- Fractal ----
+// FractalMarkerDetector::detect is non-const (lazy keypoint cache + map[]), so it
+// is NOT safe to call concurrently on one instance. We keep a pool of independent
+// detectors (one per worker thread); detect() uses pool[0]. The fractal config is
+// expensive to build, so it is constructed once per pooled detector.
+struct FractalDetectorImpl {
+    std::string config;
+    float marker_size;
+    std::vector<std::unique_ptr<nanofractal::FractalMarkerDetector>> pool;
+
+    FractalDetectorImpl(std::string cfg, float msize)
+        : config(std::move(cfg)), marker_size(msize) {
+        pool.push_back(make_detector());
+    }
+
+    // Move-only: the detector pool holds unique_ptrs. Explicitly deleting copy
+    // keeps std::is_copy_constructible false so nanobind does not try to emit a
+    // (ill-formed) copy of the unique_ptr vector.
+    FractalDetectorImpl(const FractalDetectorImpl &) = delete;
+    FractalDetectorImpl &operator=(const FractalDetectorImpl &) = delete;
+    FractalDetectorImpl(FractalDetectorImpl &&) = default;
+    FractalDetectorImpl &operator=(FractalDetectorImpl &&) = default;
+
+    std::unique_ptr<nanofractal::FractalMarkerDetector> make_detector() const {
+        auto d = std::make_unique<nanofractal::FractalMarkerDetector>();
+        d->setParams(config, marker_size > 0 ? marker_size : -1.f);
+        return d;
+    }
+
+    static void fill(const std::vector<nanofractal::FractalMarker> &markers,
+                     std::vector<int32_t> &ids, std::vector<float> &corners) {
+        size_t n = markers.size();
+        ids.resize(n);
+        corners.resize(n * 8);
+        for (size_t i = 0; i < n; i++) {
+            ids[i] = markers[i].id;
+            for (int c = 0; c < 4; c++) {
+                corners[i * 8 + c * 2 + 0] = markers[i][c].x;
+                corners[i * 8 + c * 2 + 1] = markers[i][c].y;
+            }
+        }
+    }
+
+    nb::tuple detect(RawArray arr) {
+        cv::Mat im = as_mat(arr);
+        std::vector<nanofractal::FractalMarker> markers;
+        {
+            nb::gil_scoped_release rel;
+            markers = pool[0]->detect(im);
+        }
+        std::vector<int32_t> ids;
+        std::vector<float> corners;
+        fill(markers, ids, corners);
+        size_t n = ids.size();
+        return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                              corners_to_numpy(std::move(corners), n));
+    }
+};
+
 NB_MODULE(_nanofractal, m) {
     m.attr("__version__") = NF_VERSION;
     m.def("_opencv_version", []() { return std::string(cv::getVersionString()); });
@@ -141,4 +203,27 @@ NB_MODULE(_nanofractal, m) {
         .def("estimate_pose", &ArucoDetectorImpl::estimate_pose,
              nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
              nb::arg("marker_size"));
+
+    // ---- Fractal ----
+    nb::class_<FractalDetectorImpl>(m, "FractalDetector")
+        .def(nb::init<std::string, float>(), nb::arg("config"),
+             nb::arg("marker_size"))
+        .def("detect", &FractalDetectorImpl::detect, nb::arg("image"));
+
+    m.def("_fractal_external_id", [](std::string config) {
+        nanofractal::FractalMarkerSet s(config);
+        return s.idExternal;
+    });
+
+    m.def("_fractal_external_image8", [](std::string config) {
+        nanofractal::FractalMarkerSet s(config);
+        cv::Mat M = s.fractalMarkerCollection[s.idExternal].mat();  // KxK, 0/1
+        int K = M.rows;
+        std::vector<uint8_t> grid((K + 2) * (K + 2), 0);  // black border
+        for (int y = 0; y < K; y++)
+            for (int x = 0; x < K; x++)
+                grid[(y + 1) * (K + 2) + (x + 1)] = M.at<uint8_t>(y, x) ? 255 : 0;
+        return make_owned<uint8_t>(std::move(grid),
+                                   {(size_t)(K + 2), (size_t)(K + 2)});
+    });
 }
