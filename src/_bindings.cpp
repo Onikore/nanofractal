@@ -141,6 +141,38 @@ struct FractalDetectorImpl {
         return nb::make_tuple(ids_to_numpy(std::move(ids)),
                               corners_to_numpy(std::move(corners), n));
     }
+
+    // detect + all visible (inner) corner correspondences for occlusion-robust
+    // pose: returns (ids, corners, points_2d (M,2), points_3d (M,3)).
+    nb::tuple detect_full(RawArray arr) {
+        cv::Mat im = as_mat(arr);
+        std::vector<nanofractal::FractalMarker> markers;
+        std::vector<cv::Point3f> p3d;
+        std::vector<cv::Point2f> p2d;
+        {
+            nb::gil_scoped_release rel;
+            markers = pool[0]->detect(im, p3d, p2d);
+        }
+        std::vector<int32_t> ids;
+        std::vector<float> corners;
+        fill(markers, ids, corners);
+        size_t n = ids.size();
+
+        size_t m2 = p2d.size();
+        std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
+        for (size_t i = 0; i < m2; i++) {
+            pts2[i * 2 + 0] = p2d[i].x;
+            pts2[i * 2 + 1] = p2d[i].y;
+            pts3[i * 3 + 0] = p3d[i].x;
+            pts3[i * 3 + 1] = p3d[i].y;
+            pts3[i * 3 + 2] = p3d[i].z;
+        }
+        return nb::make_tuple(
+            ids_to_numpy(std::move(ids)),
+            corners_to_numpy(std::move(corners), n),
+            make_owned<float>(std::move(pts2), {m2, (size_t)2}),
+            make_owned<float>(std::move(pts3), {m2, (size_t)3}));
+    }
 };
 
 NB_MODULE(_nanofractal, m) {
@@ -209,7 +241,8 @@ NB_MODULE(_nanofractal, m) {
     nb::class_<FractalDetectorImpl>(m, "FractalDetector")
         .def(nb::init<std::string, float>(), nb::arg("config"),
              nb::arg("marker_size"))
-        .def("detect", &FractalDetectorImpl::detect, nb::arg("image"));
+        .def("detect", &FractalDetectorImpl::detect, nb::arg("image"))
+        .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"));
 
     m.def("_fractal_external_id", [](std::string config) {
         nanofractal::FractalMarkerSet s(config);

@@ -69,7 +69,12 @@ class FractalDetector:
         self.marker_size = float(marker_size)
         self._d = _nf.FractalDetector(config, float(marker_size))
 
-    def detect(self, image: np.ndarray) -> DetectionResult:
+    def detect(self, image: np.ndarray,
+               with_inner_points: bool = False) -> DetectionResult:
+        if with_inner_points:
+            ids, corners, p2d, p3d = self._d.detect_full(image)
+            return DetectionResult(ids=ids, corners=corners,
+                                   points_2d=p2d, points_3d=p3d)
         ids, corners = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners)
 

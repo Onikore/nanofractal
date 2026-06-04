@@ -38,3 +38,46 @@ def test_detects_external_marker(render_fractal_external):
     assert ext_id in res.ids.tolist()
     idx = res.ids.tolist().index(ext_id)
     assert res.corners[idx].shape == (4, 2)
+
+
+def test_detect_without_inner_points_has_none(render_fractal_external):
+    img = render_fractal_external()
+    det = nf.FractalDetector(CONFIG)
+    res = det.detect(img)
+    assert res.points_2d is None and res.points_3d is None
+
+
+def test_detect_with_inner_points_empty_is_safe(render_fractal_external):
+    # Regression: on a clean synthetic marker FAST finds no keypoints, so the
+    # inner-point path must return empty (0,2)/(0,3) arrays rather than segfault
+    # (the upstream header dereferenced kpoints[0] on an empty vector).
+    img = render_fractal_external()
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(img, with_inner_points=True)
+    assert _nf._fractal_external_id(CONFIG) in res.ids.tolist()
+    assert res.points_2d.shape == (0, 2) and res.points_3d.shape == (0, 3)
+    assert res.points_2d.dtype == np.float32 and res.points_3d.dtype == np.float32
+
+
+def test_detect_with_inner_points_nonempty():
+    # With mild noise FAST finds corners, so inner-point correspondences are
+    # populated -- exercises the non-empty marshaling of points_2d/points_3d.
+    grid = np.asarray(_nf._fractal_external_image8(CONFIG))
+    up = np.kron(grid, np.ones((40, 40), dtype=np.uint8))
+    h, w = up.shape
+    base = np.full((h + 160, w + 160), 255, dtype=np.uint8)
+    base[80:80 + h, 80:80 + w] = up
+    rng = np.random.default_rng(0)
+    img = np.clip(base.astype(np.float32) + rng.normal(0, 6, base.shape),
+                  0, 255).astype(np.uint8)
+    img = np.ascontiguousarray(img)
+
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(img, with_inner_points=True)
+    assert _nf._fractal_external_id(CONFIG) in res.ids.tolist()
+    m = res.points_2d.shape[0]
+    assert m > 0
+    assert res.points_2d.shape == (m, 2) and res.points_3d.shape == (m, 3)
+    assert res.points_2d.dtype == np.float32 and res.points_3d.dtype == np.float32
+    assert (res.points_2d[:, 0] >= 0).all() and (res.points_2d[:, 0] < img.shape[1]).all()
+    assert (res.points_2d[:, 1] >= 0).all() and (res.points_2d[:, 1] < img.shape[0]).all()

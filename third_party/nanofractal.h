@@ -645,6 +645,7 @@ struct PicoFlann_KeyPointAdapter{
 /* KeyPoints Filter. Delete kpoints with low response and duplicated. */
 void kfilter(std::vector<cv::KeyPoint> &kpoints)
 {
+    if (kpoints.empty()) return;  // nanofractal patch: avoid kpoints[0] on empty (see PATCHES.md)
     float minResp = kpoints[0].response;
     float maxResp = kpoints[0].response;
     for (auto &p:kpoints){
@@ -1283,6 +1284,11 @@ std::vector<FractalMarker> FractalMarkerDetector::detect(const cv::Mat &img, std
         //Filter kpoints (low response) and removing duplicated.
        _private::kfilter(kpoints);
         _private::assignClass(bwimage, kpoints);
+
+        // nanofractal patch: with no FAST keypoints there are no inner points to
+        // match, and the kdtree below would index an empty index. Return the
+        // detected markers with empty p2d/p3d. (see PATCHES.md)
+        if (kpoints.empty()) return detected;
 
         _private::picoflann::KdTreeIndex<2,_private::PicoFlann_KeyPointAdapter>  kdtree;
         kdtree.build(kpoints);
