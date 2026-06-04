@@ -2,31 +2,32 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/ndarray.h>
 #include <opencv2/core.hpp>
-#include <cstring>
-#include <stdexcept>
+#include <cassert>
 #include <vector>
 
 namespace nb = nanobind;
 
-// Input image: uint8, C-contiguous, CPU. nanobind enforces dtype/contiguity/device
-// at the call boundary (raising TypeError on mismatch).
-using ImageArray = nb::ndarray<const uint8_t, nb::c_contig, nb::device::cpu>;
-
-// Raw unconstrained ndarray used as the actual function parameter type so that
-// nanobind does NOT silently coerce dtype or strides before we can inspect them.
-// We then validate dtype and contiguity ourselves and raise TypeError on mismatch.
+// NOTE: nb::ndarray with constrained template args (e.g. const uint8_t, c_contig)
+// SILENTLY COERCES mismatched inputs (casting dtype / making a contiguous copy)
+// rather than raising. That would defeat both zero-copy and input validation. So we
+// take an unconstrained RawArray as the parameter type and validate dtype +
+// C-contiguity ourselves (raising TypeError), then zero-copy wrap in as_mat().
 using RawArray = nb::ndarray<nb::numpy>;
 
 // Validate dtype==uint8 and C-contiguous on the raw (uncoerced) ndarray.
 inline void validate_image_array(const RawArray &arr) {
     // Check dtype: must be uint8 (DLPack UInt, 8 bits, 1 lane).
     auto dt = arr.dtype();
-    if (dt.code != static_cast<uint8_t>(nb::dlpack::dtype_code::UInt) || dt.bits != 8) {
+    if (dt.code != static_cast<uint8_t>(nb::dlpack::dtype_code::UInt) ||
+        dt.bits != 8 || dt.lanes != 1) {
         throw nb::type_error("image array must have dtype uint8");
     }
-    // Check C-contiguity: stride[i] (bytes) must equal product of remaining dims.
-    // For uint8, stride in bytes == stride in elements.
+    // Check C-contiguity: stride[i] (in elements) must equal the product of the
+    // trailing dims. A zero-size dimension makes numpy strides 0 yet the array is
+    // vacuously contiguous, so skip the check in that case.
     if (arr.ndim() >= 1) {
+        for (size_t i = 0; i < arr.ndim(); ++i)
+            if (arr.shape(i) == 0) return;  // empty array is contiguous
         size_t expected = 1;
         for (int i = (int)arr.ndim() - 1; i >= 0; --i) {
             if (arr.stride(i) != (int64_t)expected) {
@@ -50,7 +51,7 @@ inline cv::Mat as_mat(const RawArray &arr) {
     if (arr.ndim() == 3 && arr.shape(2) == 3) {
         return cv::Mat((int)arr.shape(0), (int)arr.shape(1), CV_8UC3, data);
     }
-    throw std::invalid_argument(
+    throw nb::value_error(
         "image must be uint8 (H,W) grayscale or (H,W,3) BGR, C-contiguous");
 }
 
@@ -74,5 +75,6 @@ inline nb::ndarray<nb::numpy, int32_t> ids_to_numpy(std::vector<int32_t> &&ids) 
 
 inline nb::ndarray<nb::numpy, float> corners_to_numpy(std::vector<float> &&c,
                                                       size_t n) {
+    assert(c.size() == n * 8 && "corners buffer must hold n*4*2 floats");
     return make_owned<float>(std::move(c), {n, (size_t)4, (size_t)2});
 }
