@@ -100,6 +100,7 @@ struct ArucoDetectorImpl {
         int T = num_threads > 0 ? num_threads
                                 : (int)std::thread::hardware_concurrency();
         if (T < 1) T = 1;
+        if (T > (int)N) T = (int)N;  // no point spawning more workers than images
         int dict_ = dict;
         unsigned attempts_ = max_attempts;
         if (N > 0) {
@@ -142,8 +143,10 @@ struct ArucoDetectorImpl {
 // FractalMarkerDetector::detect is non-const (map::operator[] is non-const; the
 // with-inner-points path also mutates a lazy getKeypts() cache), so it is NOT safe
 // to call concurrently on one instance. We keep a pool of independent detectors
-// (one per worker thread); detect() uses pool[0]. The fractal config is expensive
-// to build, so it is constructed once per pooled detector.
+// (one per worker thread); detect()/detect_full() and detect_batch's thread 0 all
+// use pool[0] -- concurrent calls on the same Python object are serialized by the
+// GIL. The fractal config is expensive to build, so it is constructed once per
+// pooled detector.
 struct FractalDetectorImpl {
     std::string config;
     float marker_size;
@@ -240,6 +243,7 @@ struct FractalDetectorImpl {
         int T = num_threads > 0 ? num_threads
                                 : (int)std::thread::hardware_concurrency();
         if (T < 1) T = 1;
+        if (T > (int)N) T = (int)N;  // avoid building detectors we won't use
         while ((int)pool.size() < T) pool.push_back(make_detector());
 
         std::vector<std::vector<int32_t>> all_ids(N);

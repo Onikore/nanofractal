@@ -57,3 +57,15 @@ def test_batch_single_thread_matches():
     for a, b in zip(one, four):
         assert a.ids.tolist() == b.ids.tolist()
         np.testing.assert_allclose(a.corners, b.corners, atol=1e-4)
+
+
+def test_batch_default_threads_all_cores():
+    # Default num_threads=0 -> use all cores; results must match sequential.
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    imgs = [_render_aruco(i) for i in [0, 1, 7, 42]]
+    seq = [det.detect(im) for im in imgs]
+    par = det.detect_batch(imgs)  # default num_threads=0
+    assert len(par) == len(seq)
+    for a, b in zip(seq, par):
+        assert a.ids.tolist() == b.ids.tolist()
+        np.testing.assert_allclose(a.corners, b.corners, atol=1e-4)
