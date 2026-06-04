@@ -42,6 +42,38 @@ struct ArucoDetectorImpl {
         return nb::make_tuple(ids_to_numpy(std::move(ids)),
                               corners_to_numpy(std::move(corners), n));
     }
+
+    // Batched pose: for each marker's 4 corners, solvePnP (IPPE) against a
+    // square of side marker_size. Returns (rvecs (N,3), tvecs (N,3)) float64.
+    nb::tuple estimate_pose(F32Arr corners, F64Arr cam, F64Arr dist,
+                            double marker_size) {
+        if (corners.ndim() != 3 || corners.shape(1) != 4 || corners.shape(2) != 2)
+            throw nb::value_error("corners must be float32 (N,4,2)");
+        if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
+            throw nb::value_error("camera_matrix must be float64 (3,3)");
+        size_t n = corners.shape(0);
+        cv::Mat camMat(3, 3, CV_64F, const_cast<double *>(cam.data()));
+        cv::Mat distMat((int)dist.shape(0), 1, CV_64F,
+                        const_cast<double *>(dist.data()));
+        std::vector<double> rvecs(n * 3), tvecs(n * 3);
+        {
+            nb::gil_scoped_release rel;
+            for (size_t i = 0; i < n; i++) {
+                aruconano::Marker mk;
+                for (int c = 0; c < 4; c++)
+                    mk.push_back(cv::Point2f(corners.data()[i * 8 + c * 2 + 0],
+                                             corners.data()[i * 8 + c * 2 + 1]));
+                auto rt = mk.estimatePose(camMat, distMat, marker_size);
+                cv::Mat rv = rt.first, tv = rt.second;
+                for (int k = 0; k < 3; k++) {
+                    rvecs[i * 3 + k] = rv.at<double>(k);
+                    tvecs[i * 3 + k] = tv.at<double>(k);
+                }
+            }
+        }
+        return nb::make_tuple(make_owned<double>(std::move(rvecs), {n, (size_t)3}),
+                              make_owned<double>(std::move(tvecs), {n, (size_t)3}));
+    }
 };
 
 NB_MODULE(_nanofractal, m) {
@@ -101,5 +133,8 @@ NB_MODULE(_nanofractal, m) {
              nb::arg("max_attempts"))
         .def_ro("max_attempts", &ArucoDetectorImpl::max_attempts)
         .def_ro("dictionary", &ArucoDetectorImpl::dict)
-        .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"));
+        .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"))
+        .def("estimate_pose", &ArucoDetectorImpl::estimate_pose,
+             nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
+             nb::arg("marker_size"));
 }

@@ -43,5 +43,17 @@ class ArucoDetector:
         ids, corners = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners)
 
+    def estimate_pose(self, corners: np.ndarray, camera_matrix: np.ndarray,
+                      dist_coeffs: np.ndarray, marker_size: float):
+        """Per-marker pose (rvecs, tvecs) of shape (N,3) float64 via solvePnP IPPE.
+
+        corners: (N,4,2) as returned by detect().
+        """
+        corners = np.ascontiguousarray(corners, dtype=np.float32)
+        camera_matrix = np.ascontiguousarray(camera_matrix, dtype=np.float64)
+        dist_coeffs = np.ascontiguousarray(dist_coeffs, dtype=np.float64)
+        return self._d.estimate_pose(corners, camera_matrix, dist_coeffs,
+                                     float(marker_size))
+
 
 __all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector"]

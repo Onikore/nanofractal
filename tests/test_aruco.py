@@ -46,3 +46,37 @@ def test_detects_rendered_marker(render_aruco, marker_id, dictionary):
     assert c.shape == (4, 2)
     assert (c >= 0).all()
     assert (c[:, 0] < img.shape[1]).all() and (c[:, 1] < img.shape[0]).all()
+
+
+def test_estimate_pose_frontal_marker(render_aruco):
+    img = render_aruco(0, dictionary=int(nf.Dict.ARUCO_MIP_36h12))
+    h, w = img.shape
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    res = det.detect(img)
+    assert 0 in res.ids.tolist()
+
+    cam = np.array([[600.0, 0, w / 2], [0, 600.0, h / 2], [0, 0, 1]],
+                   dtype=np.float64)
+    dist = np.zeros((5,), dtype=np.float64)
+    rvecs, tvecs = det.estimate_pose(res.corners, cam, dist, marker_size=0.05)
+
+    assert rvecs.shape == (len(res.ids), 3)
+    assert tvecs.shape == (len(res.ids), 3)
+    i = res.ids.tolist().index(0)
+    tz = tvecs[i, 2]
+    # A centered, frontal marker with the principal point at the image centre
+    # projects to the image centre, so its translation is ~on the optical axis.
+    assert tz > 0                          # in front of the camera
+    assert abs(tvecs[i, 0]) < 0.1 * tz     # centered horizontally
+    assert abs(tvecs[i, 1]) < 0.1 * tz     # centered vertically
+    assert np.isfinite(rvecs[i]).all()
+
+
+def test_estimate_pose_empty_input():
+    det = nf.ArucoDetector()
+    empty = np.zeros((0, 4, 2), dtype=np.float32)
+    cam = np.eye(3, dtype=np.float64)
+    dist = np.zeros((5,), dtype=np.float64)
+    rvecs, tvecs = det.estimate_pose(empty, cam, dist, marker_size=0.05)
+    assert rvecs.shape == (0, 3)
+    assert tvecs.shape == (0, 3)

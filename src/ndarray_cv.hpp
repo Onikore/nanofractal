@@ -14,6 +14,13 @@ namespace nb = nanobind;
 // C-contiguity ourselves (raising TypeError), then zero-copy wrap in as_mat().
 using RawArray = nb::ndarray<nb::numpy>;
 
+// Typed contiguous CPU float arrays for numeric I/O (e.g. pose: corners,
+// camera matrix, distortion). Unlike image inputs these are small and the
+// Python facade pre-converts them, so nanobind coercing to the exact type is
+// acceptable here.
+using F32Arr = nb::ndarray<const float, nb::c_contig, nb::device::cpu>;
+using F64Arr = nb::ndarray<const double, nb::c_contig, nb::device::cpu>;
+
 // Validate dtype==uint8 and C-contiguous on the raw (uncoerced) ndarray.
 inline void validate_image_array(const RawArray &arr) {
     // Check dtype: must be uint8 (DLPack UInt, 8 bits, 1 lane).
