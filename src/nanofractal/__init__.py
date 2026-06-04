@@ -8,6 +8,8 @@ import numpy as np
 from . import _nanofractal as _nf
 
 __version__ = _nf.__version__
+# Diagnostic hook (which OpenCV the extension is linked against). Kept as a
+# private module attribute — intentionally NOT part of the public __all__.
 _opencv_version = _nf._opencv_version
 
 
@@ -38,4 +40,4 @@ class ArucoDetector:
         return DetectionResult(ids=ids, corners=corners)
 
 
-__all__ = ["__version__", "_opencv_version", "Dict", "DetectionResult", "ArucoDetector"]
+__all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector"]
