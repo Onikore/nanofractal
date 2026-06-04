@@ -84,10 +84,11 @@ struct ArucoDetectorImpl {
 };
 
 // ---- Fractal ----
-// FractalMarkerDetector::detect is non-const (lazy keypoint cache + map[]), so it
-// is NOT safe to call concurrently on one instance. We keep a pool of independent
-// detectors (one per worker thread); detect() uses pool[0]. The fractal config is
-// expensive to build, so it is constructed once per pooled detector.
+// FractalMarkerDetector::detect is non-const (map::operator[] is non-const; the
+// with-inner-points path also mutates a lazy getKeypts() cache), so it is NOT safe
+// to call concurrently on one instance. We keep a pool of independent detectors
+// (one per worker thread); detect() uses pool[0]. The fractal config is expensive
+// to build, so it is constructed once per pooled detector.
 struct FractalDetectorImpl {
     std::string config;
     float marker_size;

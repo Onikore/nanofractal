@@ -66,6 +66,7 @@ class FractalDetector:
             raise ValueError(
                 f"invalid config {config!r}; use one of {sorted(_FRACTAL_CONFIGS)}")
         self.config = config
+        self.marker_size = float(marker_size)
         self._d = _nf.FractalDetector(config, float(marker_size))
 
     def detect(self, image: np.ndarray) -> DetectionResult:
