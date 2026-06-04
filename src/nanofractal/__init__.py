@@ -22,6 +22,9 @@ class Dict(IntEnum):
 class DetectionResult:
     ids: np.ndarray            # int32 (N,)
     corners: np.ndarray        # float32 (N, 4, 2)
+    # points_2d / points_3d are populated only by FractalDetector.detect(
+    # ..., with_inner_points=True); they stay None for ArUco and plain fractal
+    # detection.
     points_2d: np.ndarray | None = None  # float32 (M, 2)
     points_3d: np.ndarray | None = None  # float32 (M, 3)
 
@@ -29,6 +32,7 @@ class DetectionResult:
 class ArucoDetector:
     def __init__(self, dictionary: Dict = Dict.ARUCO_MIP_36h12,
                  max_attempts: int = 1) -> None:
+        self.dictionary = Dict(dictionary)
         self._d = _nf.ArucoDetector(int(dictionary), int(max_attempts))
 
     @property

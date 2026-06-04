@@ -6,6 +6,43 @@
 
 namespace nb = nanobind;
 
+// ---- ArUco Nano v6 ----
+// Defined at namespace scope (not inside NB_MODULE) so it is a non-local type,
+// which is the conventional, portable way to use it as a nb::class_ template arg.
+struct ArucoDetectorImpl {
+    int dict;
+    unsigned max_attempts;
+    ArucoDetectorImpl(int dictionary, unsigned attempts) {
+        if (dictionary != 0 && dictionary != 1)
+            throw nb::value_error(
+                "dictionary must be 0 (ARUCO_MIP_36h12) or 1 (APRILTAG_36h11)");
+        dict = dictionary;
+        max_attempts = attempts ? attempts : 1u;
+    }
+
+    nb::tuple detect(RawArray arr) {
+        cv::Mat im = as_mat(arr);
+        std::vector<aruconano::Marker> markers;
+        {
+            nb::gil_scoped_release rel;
+            markers = aruconano::MarkerDetector::detect(
+                im, max_attempts, (aruconano::MarkerDetector::Dict)dict);
+        }
+        size_t n = markers.size();
+        std::vector<int32_t> ids(n);
+        std::vector<float> corners(n * 8);
+        for (size_t i = 0; i < n; i++) {
+            ids[i] = markers[i].id;
+            for (int c = 0; c < 4; c++) {
+                corners[i * 8 + c * 2 + 0] = markers[i][c].x;
+                corners[i * 8 + c * 2 + 1] = markers[i][c].y;
+            }
+        }
+        return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                              corners_to_numpy(std::move(corners), n));
+    }
+};
+
 NB_MODULE(_nanofractal, m) {
     m.attr("__version__") = NF_VERSION;
     m.def("_opencv_version", []() { return std::string(cv::getVersionString()); });
@@ -36,38 +73,10 @@ NB_MODULE(_nanofractal, m) {
     });
 
     // ---- ArUco Nano v6 ----
-    struct ArucoDetectorImpl {
-        int dict;
-        unsigned max_attempts;
-        ArucoDetectorImpl(int dictionary, unsigned attempts)
-            : dict(dictionary), max_attempts(attempts ? attempts : 1u) {}
-
-        nb::tuple detect(RawArray arr) {
-            cv::Mat im = as_mat(arr);
-            std::vector<aruconano::Marker> markers;
-            {
-                nb::gil_scoped_release rel;
-                markers = aruconano::MarkerDetector::detect(
-                    im, max_attempts, (aruconano::MarkerDetector::Dict)dict);
-            }
-            size_t n = markers.size();
-            std::vector<int32_t> ids(n);
-            std::vector<float> corners(n * 8);
-            for (size_t i = 0; i < n; i++) {
-                ids[i] = markers[i].id;
-                for (int c = 0; c < 4; c++) {
-                    corners[i * 8 + c * 2 + 0] = markers[i][c].x;
-                    corners[i * 8 + c * 2 + 1] = markers[i][c].y;
-                }
-            }
-            return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                                  corners_to_numpy(std::move(corners), n));
-        }
-    };
-
     nb::class_<ArucoDetectorImpl>(m, "ArucoDetector")
         .def(nb::init<int, unsigned>(), nb::arg("dictionary"),
              nb::arg("max_attempts"))
         .def_ro("max_attempts", &ArucoDetectorImpl::max_attempts)
+        .def_ro("dictionary", &ArucoDetectorImpl::dict)
         .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"));
 }
