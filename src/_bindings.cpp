@@ -2,6 +2,7 @@
 #include <nanobind/stl/string.h>
 #include <opencv2/core.hpp>
 #include "ndarray_cv.hpp"
+#include "aruco_nano_v6.h"
 
 namespace nb = nanobind;
 
@@ -33,4 +34,40 @@ NB_MODULE(_nanofractal, m) {
                                 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f};
         return corners_to_numpy(std::move(c), 2);
     });
+
+    // ---- ArUco Nano v6 ----
+    struct ArucoDetectorImpl {
+        int dict;
+        unsigned max_attempts;
+        ArucoDetectorImpl(int dictionary, unsigned attempts)
+            : dict(dictionary), max_attempts(attempts ? attempts : 1u) {}
+
+        nb::tuple detect(RawArray arr) {
+            cv::Mat im = as_mat(arr);
+            std::vector<aruconano::Marker> markers;
+            {
+                nb::gil_scoped_release rel;
+                markers = aruconano::MarkerDetector::detect(
+                    im, max_attempts, (aruconano::MarkerDetector::Dict)dict);
+            }
+            size_t n = markers.size();
+            std::vector<int32_t> ids(n);
+            std::vector<float> corners(n * 8);
+            for (size_t i = 0; i < n; i++) {
+                ids[i] = markers[i].id;
+                for (int c = 0; c < 4; c++) {
+                    corners[i * 8 + c * 2 + 0] = markers[i][c].x;
+                    corners[i * 8 + c * 2 + 1] = markers[i][c].y;
+                }
+            }
+            return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                                  corners_to_numpy(std::move(corners), n));
+        }
+    };
+
+    nb::class_<ArucoDetectorImpl>(m, "ArucoDetector")
+        .def(nb::init<int, unsigned>(), nb::arg("dictionary"),
+             nb::arg("max_attempts"))
+        .def_ro("max_attempts", &ArucoDetectorImpl::max_attempts)
+        .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"));
 }
