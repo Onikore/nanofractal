@@ -43,6 +43,11 @@ class ArucoDetector:
         ids, corners = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners)
 
+    def detect_batch(self, images, num_threads: int = 0) -> list[DetectionResult]:
+        """Detect markers in many images in parallel (0 = use all cores)."""
+        results = self._d.detect_batch(list(images), int(num_threads))
+        return [DetectionResult(ids=i, corners=c) for i, c in results]
+
     def estimate_pose(self, corners: np.ndarray, camera_matrix: np.ndarray,
                       dist_coeffs: np.ndarray,
                       marker_size: float) -> tuple[np.ndarray, np.ndarray]:
@@ -77,6 +82,11 @@ class FractalDetector:
                                    points_2d=p2d, points_3d=p3d)
         ids, corners = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners)
+
+    def detect_batch(self, images, num_threads: int = 0) -> list[DetectionResult]:
+        """Detect fractal markers in many images in parallel (0 = all cores)."""
+        results = self._d.detect_batch(list(images), int(num_threads))
+        return [DetectionResult(ids=i, corners=c) for i, c in results]
 
 
 __all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector",

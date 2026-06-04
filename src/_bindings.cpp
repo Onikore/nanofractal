@@ -1,8 +1,11 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
+#include <nanobind/stl/vector.h>
 #include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp>  // FastFeatureDetector, used by nanofractal.h
 #include <memory>
+#include <thread>
+#include <atomic>
 #include "ndarray_cv.hpp"
 #include "aruco_nano_v6.h"
 #include "aruco_dicts.hpp"
@@ -80,6 +83,58 @@ struct ArucoDetectorImpl {
         }
         return nb::make_tuple(make_owned<double>(std::move(rvecs), {n, (size_t)3}),
                               make_owned<double>(std::move(tvecs), {n, (size_t)3}));
+    }
+
+    // Parallel batch detection. MarkerDetector::detect is stateless, so all worker
+    // threads can share this detector. Inputs are validated/wrapped (GIL held),
+    // detection runs GIL-released across a thread pool, then results are marshaled
+    // to numpy (GIL held).
+    std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
+                                         int num_threads) {
+        size_t N = imgs.size();
+        std::vector<cv::Mat> mats(N);
+        for (size_t i = 0; i < N; i++) mats[i] = as_mat(imgs[i]);
+
+        std::vector<std::vector<int32_t>> all_ids(N);
+        std::vector<std::vector<float>> all_corners(N);
+        int T = num_threads > 0 ? num_threads
+                                : (int)std::thread::hardware_concurrency();
+        if (T < 1) T = 1;
+        int dict_ = dict;
+        unsigned attempts_ = max_attempts;
+        if (N > 0) {
+            nb::gil_scoped_release rel;
+            std::atomic<size_t> next{0};
+            auto worker = [&]() {
+                size_t i;
+                while ((i = next.fetch_add(1)) < N) {
+                    auto markers = aruconano::MarkerDetector::detect(
+                        mats[i], attempts_, (aruconano::MarkerDetector::Dict)dict_);
+                    size_t n = markers.size();
+                    all_ids[i].resize(n);
+                    all_corners[i].resize(n * 8);
+                    for (size_t k = 0; k < n; k++) {
+                        all_ids[i][k] = markers[k].id;
+                        for (int c = 0; c < 4; c++) {
+                            all_corners[i][k * 8 + c * 2 + 0] = markers[k][c].x;
+                            all_corners[i][k * 8 + c * 2 + 1] = markers[k][c].y;
+                        }
+                    }
+                }
+            };
+            std::vector<std::thread> ths;
+            for (int t = 0; t < T; t++) ths.emplace_back(worker);
+            for (auto &x : ths) x.join();
+        }
+        std::vector<nb::object> out;
+        out.reserve(N);
+        for (size_t i = 0; i < N; i++) {
+            size_t n = all_ids[i].size();
+            out.push_back(nb::make_tuple(
+                ids_to_numpy(std::move(all_ids[i])),
+                corners_to_numpy(std::move(all_corners[i]), n)));
+        }
+        return out;
     }
 };
 
@@ -173,6 +228,46 @@ struct FractalDetectorImpl {
             make_owned<float>(std::move(pts2), {m2, (size_t)2}),
             make_owned<float>(std::move(pts3), {m2, (size_t)3}));
     }
+
+    // Parallel batch detection. The fractal detector is not thread-safe, so each
+    // worker thread t uses its own pool[t] (built once, lazily grown to T).
+    std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
+                                         int num_threads) {
+        size_t N = imgs.size();
+        std::vector<cv::Mat> mats(N);
+        for (size_t i = 0; i < N; i++) mats[i] = as_mat(imgs[i]);
+
+        int T = num_threads > 0 ? num_threads
+                                : (int)std::thread::hardware_concurrency();
+        if (T < 1) T = 1;
+        while ((int)pool.size() < T) pool.push_back(make_detector());
+
+        std::vector<std::vector<int32_t>> all_ids(N);
+        std::vector<std::vector<float>> all_corners(N);
+        if (N > 0) {
+            nb::gil_scoped_release rel;
+            std::atomic<size_t> next{0};
+            auto worker = [&](int t) {
+                size_t i;
+                while ((i = next.fetch_add(1)) < N) {
+                    auto markers = pool[t]->detect(mats[i]);
+                    fill(markers, all_ids[i], all_corners[i]);
+                }
+            };
+            std::vector<std::thread> ths;
+            for (int t = 0; t < T; t++) ths.emplace_back(worker, t);
+            for (auto &x : ths) x.join();
+        }
+        std::vector<nb::object> out;
+        out.reserve(N);
+        for (size_t i = 0; i < N; i++) {
+            size_t n = all_ids[i].size();
+            out.push_back(nb::make_tuple(
+                ids_to_numpy(std::move(all_ids[i])),
+                corners_to_numpy(std::move(all_corners[i]), n)));
+        }
+        return out;
+    }
 };
 
 NB_MODULE(_nanofractal, m) {
@@ -235,14 +330,18 @@ NB_MODULE(_nanofractal, m) {
         .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"))
         .def("estimate_pose", &ArucoDetectorImpl::estimate_pose,
              nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
-             nb::arg("marker_size"));
+             nb::arg("marker_size"))
+        .def("detect_batch", &ArucoDetectorImpl::detect_batch,
+             nb::arg("images"), nb::arg("num_threads") = 0);
 
     // ---- Fractal ----
     nb::class_<FractalDetectorImpl>(m, "FractalDetector")
         .def(nb::init<std::string, float>(), nb::arg("config"),
              nb::arg("marker_size"))
         .def("detect", &FractalDetectorImpl::detect, nb::arg("image"))
-        .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"));
+        .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"))
+        .def("detect_batch", &FractalDetectorImpl::detect_batch,
+             nb::arg("images"), nb::arg("num_threads") = 0);
 
     m.def("_fractal_external_id", [](std::string config) {
         nanofractal::FractalMarkerSet s(config);
