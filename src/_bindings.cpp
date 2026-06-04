@@ -3,6 +3,7 @@
 #include <opencv2/core.hpp>
 #include "ndarray_cv.hpp"
 #include "aruco_nano_v6.h"
+#include "aruco_dicts.hpp"
 
 namespace nb = nanobind;
 
@@ -70,6 +71,26 @@ NB_MODULE(_nanofractal, m) {
         std::vector<float> c = {1.5f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f,
                                 1.f, 2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f};
         return corners_to_numpy(std::move(c), 2);
+    });
+
+    // Render an 8x8 cell grid (1-cell black border + 6x6 inner code) for a marker
+    // id, matching the bit ordering of touulong() in aruco_nano_v6.h. Test/tool use.
+    m.def("_aruco_marker_image8", [](int dict, int id) {
+        const std::vector<uint64_t> &codes =
+            dict == 0 ? aruco_dicts::mip_36h12() : aruco_dicts::apriltag_36h11();
+        if (id < 0 || (size_t)id >= codes.size())
+            throw nb::value_error("marker id out of range");
+        uint64_t code = codes[id];
+
+        std::vector<uint8_t> grid(8 * 8, 0);  // border stays 0 (black)
+        int b = 0;
+        for (int y = 5; y >= 0; y--)
+            for (int x = 5; x >= 0; x--) {
+                int bit = (int)((code >> b) & 1ULL);
+                grid[(y + 1) * 8 + (x + 1)] = bit ? 255 : 0;  // +1 for border
+                b++;
+            }
+        return make_owned<uint8_t>(std::move(grid), {(size_t)8, (size_t)8});
     });
 
     // ---- ArUco Nano v6 ----

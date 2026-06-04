@@ -31,3 +31,16 @@ def test_detect_wrong_dtype_raises():
     det = nf.ArucoDetector()
     with pytest.raises(TypeError):
         det.detect(np.zeros((480, 640), dtype=np.float32))
+
+
+@pytest.mark.parametrize("marker_id", [0, 1, 7, 42])
+def test_detects_rendered_marker(render_aruco, marker_id):
+    img = render_aruco(marker_id, dictionary=int(nf.Dict.ARUCO_MIP_36h12))
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    res = det.detect(img)
+    assert marker_id in res.ids.tolist()
+    idx = res.ids.tolist().index(marker_id)
+    c = res.corners[idx]
+    assert c.shape == (4, 2)
+    assert (c >= 0).all()
+    assert (c[:, 0] < img.shape[1]).all() and (c[:, 1] < img.shape[0]).all()
