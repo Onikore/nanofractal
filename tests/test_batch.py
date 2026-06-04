@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import nanofractal as nf
 import nanofractal._nanofractal as _nf
@@ -69,3 +71,26 @@ def test_batch_default_threads_all_cores():
     for a, b in zip(seq, par):
         assert a.ids.tolist() == b.ids.tolist()
         np.testing.assert_allclose(a.corners, b.corners, atol=1e-4)
+
+
+def test_batch_releases_gil():
+    # A background Python thread must keep advancing while detect_batch runs,
+    # proving the GIL is released during the C++ detection.
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    imgs = [_render_aruco(i % 50, cell=60) for i in range(64)]
+    counter = {"n": 0}
+    stop = threading.Event()
+
+    def spin():
+        while not stop.is_set():
+            counter["n"] += 1
+
+    t = threading.Thread(target=spin)
+    t.start()
+    try:
+        det.detect_batch(imgs, num_threads=4)
+    finally:
+        stop.set()
+        t.join()
+    # If the GIL were held for the whole call the spinner could not advance.
+    assert counter["n"] > 0
