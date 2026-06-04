@@ -81,3 +81,6 @@ def test_detect_with_inner_points_nonempty():
     assert res.points_2d.dtype == np.float32 and res.points_3d.dtype == np.float32
     assert (res.points_2d[:, 0] >= 0).all() and (res.points_2d[:, 0] < img.shape[1]).all()
     assert (res.points_2d[:, 1] >= 0).all() and (res.points_2d[:, 1] < img.shape[0]).all()
+    # object points are within the marker (marker_size=0.85 -> |coord| <= ~0.43m)
+    assert np.abs(res.points_3d).max() < 1.0
+    assert (res.points_3d[:, 2] == 0).all()  # planar marker
