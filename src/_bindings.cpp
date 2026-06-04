@@ -76,6 +76,8 @@ NB_MODULE(_nanofractal, m) {
     // Render an 8x8 cell grid (1-cell black border + 6x6 inner code) for a marker
     // id, matching the bit ordering of touulong() in aruco_nano_v6.h. Test/tool use.
     m.def("_aruco_marker_image8", [](int dict, int id) {
+        if (dict != 0 && dict != 1)
+            throw nb::value_error("dict must be 0 (mip_36h12) or 1 (apriltag_36h11)");
         const std::vector<uint64_t> &codes =
             dict == 0 ? aruco_dicts::mip_36h12() : aruco_dicts::apriltag_36h11();
         if (id < 0 || (size_t)id >= codes.size())
