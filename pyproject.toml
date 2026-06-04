@@ -1,0 +1,21 @@
+[build-system]
+requires = ["scikit-build-core>=0.10", "nanobind>=2.1.0"]
+build-backend = "scikit_build_core.build"
+
+[project]
+name = "nanofractal"
+version = "0.1.0"
+description = "High-performance fiducial marker detection (ArUco Nano v6 + Fractal)"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+dependencies = ["numpy>=1.21"]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "pytest-benchmark>=4"]
+
+[tool.scikit-build]
+minimum-version = "0.10"
+build-dir = "build/{wheel_tag}"
+wheel.packages = ["src/nanofractal"]
+cmake.build-type = "Release"
