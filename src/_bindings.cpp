@@ -6,6 +6,7 @@
 #include <memory>
 #include <thread>
 #include <atomic>
+#include <cmath>
 #include "ndarray_cv.hpp"
 #include "aruco_nano_v6.h"
 #include "aruco_dicts.hpp"
@@ -272,6 +273,71 @@ struct FractalDetectorImpl {
         }
         return out;
     }
+
+    // Single fractal-marker pose via solvePnP (IPPE, planar). Uses the rich
+    // inner+outer correspondences when available (>=4 points); otherwise falls
+    // back to the 4 outer corners with a square of side marker_size. Returns
+    // (rvec(3,), tvec(3,), rms_reproj_px) float64, or None when no marker / <4 pts.
+    nb::object estimate_pose(F32Arr p2d, F32Arr p3d, F32Arr corners,
+                             F64Arr cam, F64Arr dist) {
+        if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
+            throw nb::value_error("camera_matrix must be float64 (3,3)");
+        if (dist.ndim() != 1)
+            throw nb::value_error("dist_coeffs must be 1-D float64");
+        cv::Mat camMat(3, 3, CV_64F, const_cast<double *>(cam.data()));
+        cv::Mat distMat((int)dist.shape(0), 1, CV_64F,
+                        const_cast<double *>(dist.data()));
+
+        std::vector<cv::Point3f> obj;
+        std::vector<cv::Point2f> img;
+        size_t M = (p2d.ndim() == 2) ? p2d.shape(0) : 0;
+        bool have_inner = (M >= 4 && p3d.ndim() == 2 && p3d.shape(0) == M &&
+                           p3d.shape(1) == 3 && p2d.shape(1) == 2);
+        if (have_inner) {
+            obj.reserve(M);
+            img.reserve(M);
+            for (size_t i = 0; i < M; i++) {
+                obj.emplace_back(p3d.data()[i * 3 + 0], p3d.data()[i * 3 + 1],
+                                 p3d.data()[i * 3 + 2]);
+                img.emplace_back(p2d.data()[i * 2 + 0], p2d.data()[i * 2 + 1]);
+            }
+        } else {
+            size_t N = (corners.ndim() == 3 && corners.shape(1) == 4 &&
+                        corners.shape(2) == 2) ? corners.shape(0) : 0;
+            if (N < 1) return nb::none();  // no marker visible
+            float h = (marker_size > 0 ? marker_size : 1.0f) / 2.f;
+            obj = {{-h, h, 0.f}, {h, h, 0.f}, {h, -h, 0.f}, {-h, -h, 0.f}};
+            for (int c = 0; c < 4; c++)  // outer corners of the first marker
+                img.emplace_back(corners.data()[c * 2 + 0], corners.data()[c * 2 + 1]);
+        }
+
+        cv::Mat rvec, tvec;
+        double rms = 0;
+        bool ok;
+        {
+            nb::gil_scoped_release rel;
+            ok = cv::solvePnP(obj, img, camMat, distMat, rvec, tvec, false,
+                              cv::SOLVEPNP_IPPE);
+            if (ok) {
+                std::vector<cv::Point2f> proj;
+                cv::projectPoints(obj, rvec, tvec, camMat, distMat, proj);
+                double se = 0;
+                for (size_t i = 0; i < proj.size(); i++) {
+                    double dx = proj[i].x - img[i].x, dy = proj[i].y - img[i].y;
+                    se += dx * dx + dy * dy;
+                }
+                rms = std::sqrt(se / (double)proj.size());
+            }
+        }
+        if (!ok) return nb::none();
+        std::vector<double> r(3), t(3);
+        for (int k = 0; k < 3; k++) {
+            r[k] = rvec.at<double>(k);
+            t[k] = tvec.at<double>(k);
+        }
+        return nb::make_tuple(make_owned<double>(std::move(r), {(size_t)3}),
+                              make_owned<double>(std::move(t), {(size_t)3}), rms);
+    }
 };
 
 NB_MODULE(_nanofractal, m) {
@@ -345,7 +411,10 @@ NB_MODULE(_nanofractal, m) {
         .def("detect", &FractalDetectorImpl::detect, nb::arg("image"))
         .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"))
         .def("detect_batch", &FractalDetectorImpl::detect_batch,
-             nb::arg("images"), nb::arg("num_threads") = 0);
+             nb::arg("images"), nb::arg("num_threads") = 0)
+        .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
+             nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("corners"),
+             nb::arg("camera_matrix"), nb::arg("dist_coeffs"));
 
     m.def("_fractal_external_id", [](std::string config) {
         nanofractal::FractalMarkerSet s(config);

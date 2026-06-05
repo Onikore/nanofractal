@@ -45,3 +45,9 @@ class FractalDetector:
     def detect_batch(
         self, images: Sequence[npt.NDArray[np.uint8]], num_threads: int = ...
     ) -> list[DetectionResult]: ...
+    def estimate_pose(
+        self,
+        result: DetectionResult,
+        camera_matrix: npt.NDArray[np.float64],
+        dist_coeffs: npt.NDArray[np.float64],
+    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float] | None: ...

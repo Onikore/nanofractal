@@ -88,6 +88,28 @@ class FractalDetector:
         results = self._d.detect_batch(list(images), int(num_threads))
         return [DetectionResult(ids=i, corners=c) for i, c in results]
 
+    def estimate_pose(self, result: DetectionResult, camera_matrix: np.ndarray,
+                      dist_coeffs: np.ndarray):
+        """Pose of the fractal marker as ``(rvec, tvec, reproj_err)`` or ``None``.
+
+        Uses the inner+outer correspondences (``result.points_2d``/``points_3d``
+        from ``detect(..., with_inner_points=True)``) when there are >= 4 points
+        -- accurate and occlusion-robust -- otherwise falls back to the 4 outer
+        corners with a square of side ``marker_size``. Returns ``None`` when no
+        marker is visible. ``rvec``/``tvec`` are float64 ``(3,)``; ``reproj_err``
+        is the RMS reprojection error in pixels (use it to gate noisy poses).
+        """
+        cam = np.ascontiguousarray(camera_matrix, dtype=np.float64)
+        dist = np.ascontiguousarray(dist_coeffs, dtype=np.float64)
+        p2d = result.points_2d
+        p3d = result.points_3d
+        p2d = (np.ascontiguousarray(p2d, dtype=np.float32)
+               if p2d is not None else np.zeros((0, 2), dtype=np.float32))
+        p3d = (np.ascontiguousarray(p3d, dtype=np.float32)
+               if p3d is not None else np.zeros((0, 3), dtype=np.float32))
+        corners = np.ascontiguousarray(result.corners, dtype=np.float32)
+        return self._d.estimate_pose(p2d, p3d, corners, cam, dist)
+
 
 __all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector",
            "FractalDetector"]

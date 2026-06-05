@@ -90,3 +90,80 @@ def test_detect_with_inner_points_nonempty():
     # object points are within the marker (marker_size=0.85 -> |coord| <= ~0.43m)
     assert np.abs(res.points_3d).max() < 1.0
     assert (res.points_3d[:, 2] == 0).all()  # planar marker
+
+
+def _camera(img, f=600.0):
+    h, w = img.shape[:2]
+    cam = np.array([[f, 0, w / 2.0], [0, f, h / 2.0], [0, 0, 1]], dtype=np.float64)
+    dist = np.zeros(5, dtype=np.float64)
+    return cam, dist
+
+
+def _noisy_fractal(sigma=6.0, seed=0):
+    grid = np.asarray(_nf._fractal_external_image8(CONFIG))
+    up = np.kron(grid, np.ones((40, 40), dtype=np.uint8))
+    h, w = up.shape
+    base = np.full((h + 160, w + 160), 255, dtype=np.uint8)
+    base[80:80 + h, 80:80 + w] = up
+    rng = np.random.default_rng(seed)
+    img = np.clip(base.astype(np.float32) + rng.normal(0, sigma, base.shape),
+                  0, 255).astype(np.uint8)
+    return np.ascontiguousarray(img)
+
+
+def test_estimate_pose_fallback_outer_corners(render_fractal_external):
+    # No inner points requested -> estimate_pose must fall back to the 4 outer
+    # corners using marker_size, with no need for the caller to touch solvePnP.
+    img = render_fractal_external()
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(img)
+    assert res.points_2d is None
+    cam, dist = _camera(img)
+    out = det.estimate_pose(res, cam, dist)
+    assert out is not None
+    rvec, tvec, err = out
+    assert rvec.shape == (3,) and tvec.shape == (3,)
+    assert rvec.dtype == np.float64 and tvec.dtype == np.float64
+    tz = tvec[2]
+    assert tz > 0
+    assert abs(tvec[0]) < 0.1 * tz and abs(tvec[1]) < 0.1 * tz
+    # the fallback object-point order matches the detected corner order, so a
+    # frontal marker reprojects to within a pixel
+    assert 0.0 <= err < 2.0
+
+
+def test_estimate_pose_inner_points_is_accurate():
+    # With inner points the pose uses many coplanar correspondences -> low reproj.
+    img = _noisy_fractal()
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(img, with_inner_points=True)
+    assert res.points_2d is not None and res.points_2d.shape[0] >= 4
+    cam, dist = _camera(img)
+    out = det.estimate_pose(res, cam, dist)
+    assert out is not None
+    rvec, tvec, err = out
+    assert tvec[2] > 0
+    assert err < 3.0  # RMS reprojection error in pixels
+
+
+def test_estimate_pose_empty_inner_falls_back(render_fractal_external):
+    # with_inner_points=True but clean image -> points_2d is (0,2); must not raise
+    # and must fall back to the outer corners (the empty-inner-points pitfall is
+    # hidden inside estimate_pose).
+    img = render_fractal_external()
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(img, with_inner_points=True)
+    assert res.points_2d.shape == (0, 2)
+    cam, dist = _camera(img)
+    out = det.estimate_pose(res, cam, dist)
+    assert out is not None
+    _, tvec, _ = out
+    assert tvec[2] > 0
+
+
+def test_estimate_pose_no_marker_returns_none():
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(np.full((480, 640), 255, dtype=np.uint8))
+    cam = np.eye(3, dtype=np.float64)
+    dist = np.zeros(5, dtype=np.float64)
+    assert det.estimate_pose(res, cam, dist) is None
