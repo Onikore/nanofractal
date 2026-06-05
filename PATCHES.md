@@ -1,9 +1,9 @@
 # Patches to vendored headers
 
 We vendor `third_party/aruco_nano_v6.h` and `third_party/nanofractal.h` from
-upstream. They are kept as close to upstream as possible. The originals as
-received are also kept at the repo root (`aruco_nano_v6.h`, `nanofractal.h`) for
-provenance/diffing. The only intentional divergences are listed here.
+upstream and keep them as close to upstream as possible. The unmodified upstream
+of `nanofractal.h` is recoverable from git history (the commit immediately before
+the patch described below). The only intentional divergences are listed here.
 
 ## third_party/nanofractal.h — guard the inner-point path against empty FAST keypoints
 

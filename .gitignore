@@ -10,3 +10,4 @@ _skbuild/
 # secrets — never commit a real token
 .pypirc
 .env
+docs/

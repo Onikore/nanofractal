@@ -1,40 +1,42 @@
 # Publishing to PyPI
 
-## 1. Put your token in `.pypirc`
+Releases are automated by GitHub Actions (`.github/workflows/release.yml`):
+pushing a version tag builds portable `manylinux` wheels (with a minimal static
+OpenCV linked in — see `ci/build-opencv.sh`) plus an sdist, and uploads them to
+PyPI.
 
-`.pypirc` already exists at the repo root and is git-ignored (your token is never
-committed). Open it and replace `pypi-PASTE_YOUR_..._TOKEN_HERE` with the token
-from https://pypi.org/manage/account/token/ (and test.pypi.org for TestPyPI).
+## One-time setup: PyPI token as a repo secret
 
-## 2. Build the distribution
+The release workflow authenticates with a PyPI API token stored as the GitHub
+Actions secret **`PYPI_API_TOKEN`**.
+
+- GitHub → repo → Settings → Secrets and variables → Actions → New repository secret
+- Name: `PYPI_API_TOKEN`
+- Value: a token from https://pypi.org/manage/account/token/ (starts with `pypi-`)
+
+(Or, instead of `gh`'s web UI: `gh secret set PYPI_API_TOKEN`.)
+
+## Cut a release
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m pip install build twine
-env -u PYTHONPATH .venv/bin/python -m build
+# bump version in pyproject.toml first if needed, commit, then:
+git tag v0.1.0
+git push origin main
+git push origin v0.1.0     # this triggers the release workflow -> PyPI
 ```
 
-This produces `dist/*.whl` and `dist/*.tar.gz`.
+Each release needs a **new version** — PyPI rejects re-uploading an existing one.
+Pushing to `main` only runs the fast `ci` checks; it does **not** publish.
 
-## 3. Upload
+## Manual / local publish (fallback)
 
-Test on TestPyPI first, then the real index:
+`.pypirc` at the repo root (git-ignored) holds your token for manual uploads:
 
 ```bash
-# TestPyPI
-env -u PYTHONPATH .venv/bin/python -m twine upload --config-file .pypirc -r testpypi dist/*
-
-# PyPI
-env -u PYTHONPATH .venv/bin/python -m twine upload --config-file .pypirc -r pypi dist/*
+.venv/bin/python -m pip install build twine
+.venv/bin/python -m build
+.venv/bin/python -m twine upload --config-file .pypirc -r pypi dist/*
 ```
 
-## ⚠️ Important: the local wheel is NOT portable yet
-
-The wheel built here links dynamically against this machine's **system OpenCV** and
-is tagged for this exact Python/platform. It will only install where a compatible
-OpenCV is present. That is fine for a TestPyPI smoke test, but **not** for public
-distribution.
-
-Portable, self-contained `manylinux` wheels (minimal OpenCV statically linked,
-built across CPython versions via `cibuildwheel`) are the subject of **Plan B**
-(`docs/superpowers/plans/`), to be implemented after the core library is complete.
-Publish real releases only after Plan B.
+Note: a locally built wheel links your **system OpenCV** and is not portable —
+use it only for a TestPyPI smoke test. The CI wheels are the portable ones.
