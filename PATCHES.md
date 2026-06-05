@@ -27,3 +27,13 @@ there are simply no inner-corner correspondences, which is the correct result.
 Regression tests: `tests/test_fractal.py::test_detect_with_inner_points_empty_is_safe`
 (clean image → empty, no crash) and `::test_detect_with_inner_points_nonempty`
 (noisy image → populated correspondences).
+
+## Both headers — remove unused `#include <opencv2/highgui.hpp>`
+
+`aruco_nano_v6.h` and `nanofractal.h` each `#include <opencv2/highgui.hpp>`, but
+their detection/pose/draw code paths call **no** highgui functions (highgui only
+appears in the example snippets in the file comments, e.g. `imread`/`imwrite`).
+The include is removed (replaced by a `// nanofractal patch:` comment) so the
+library builds against a **minimal OpenCV** without the `highgui` module — which
+is how the portable wheels are built in CI (`ci/build-opencv.sh`). Builds against
+a full system OpenCV are unaffected.

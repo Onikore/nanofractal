@@ -56,7 +56,8 @@
 #define _ARUCONanoFractal_H_
 #define FractalNanoVersion 4
 #include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
+// nanofractal patch: removed unused <opencv2/highgui.hpp> so a minimal OpenCV
+// (no highgui module) suffices; detection calls no highgui functions.
 #include <opencv2/calib3d.hpp>
 
 #include <map>

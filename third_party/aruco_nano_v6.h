@@ -56,7 +56,8 @@ limitations under the License.
 #define _ArucoNANO_H_
 #define ArucoNanoVersion 6
 #include <opencv2/imgproc.hpp>
-#include <opencv2/highgui.hpp>
+// nanofractal patch: removed unused <opencv2/highgui.hpp> so a minimal OpenCV
+// (no highgui module) suffices; the detect path calls no highgui functions.
 #include <opencv2/calib3d.hpp>
 #include <bitset>
 
