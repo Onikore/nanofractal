@@ -30,6 +30,12 @@ def test_invalid_config_raises():
         nf.FractalDetector("NOT_A_CONFIG")
 
 
+def test_detect_empty_frame_raises():
+    det = nf.FractalDetector(CONFIG)
+    with pytest.raises(ValueError):
+        det.detect(np.zeros((0, 640), dtype=np.uint8))
+
+
 def test_detects_external_marker(render_fractal_external):
     img = render_fractal_external()
     det = nf.FractalDetector(CONFIG)

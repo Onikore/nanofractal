@@ -28,7 +28,7 @@ struct ArucoDetectorImpl {
     }
 
     nb::tuple detect(RawArray arr) {
-        cv::Mat im = as_mat(arr);
+        cv::Mat im = as_image(arr);
         std::vector<aruconano::Marker> markers;
         {
             nb::gil_scoped_release rel;
@@ -93,7 +93,7 @@ struct ArucoDetectorImpl {
                                          int num_threads) {
         size_t N = imgs.size();
         std::vector<cv::Mat> mats(N);
-        for (size_t i = 0; i < N; i++) mats[i] = as_mat(imgs[i]);
+        for (size_t i = 0; i < N; i++) mats[i] = as_image(imgs[i]);
 
         std::vector<std::vector<int32_t>> all_ids(N);
         std::vector<std::vector<float>> all_corners(N);
@@ -186,7 +186,7 @@ struct FractalDetectorImpl {
     }
 
     nb::tuple detect(RawArray arr) {
-        cv::Mat im = as_mat(arr);
+        cv::Mat im = as_image(arr);
         std::vector<nanofractal::FractalMarker> markers;
         {
             nb::gil_scoped_release rel;
@@ -203,7 +203,7 @@ struct FractalDetectorImpl {
     // detect + all visible (inner) corner correspondences for occlusion-robust
     // pose: returns (ids, corners, points_2d (M,2), points_3d (M,3)).
     nb::tuple detect_full(RawArray arr) {
-        cv::Mat im = as_mat(arr);
+        cv::Mat im = as_image(arr);
         std::vector<nanofractal::FractalMarker> markers;
         std::vector<cv::Point3f> p3d;
         std::vector<cv::Point2f> p2d;
@@ -238,7 +238,7 @@ struct FractalDetectorImpl {
                                          int num_threads) {
         size_t N = imgs.size();
         std::vector<cv::Mat> mats(N);
-        for (size_t i = 0; i < N; i++) mats[i] = as_mat(imgs[i]);
+        for (size_t i = 0; i < N; i++) mats[i] = as_image(imgs[i]);
 
         int T = num_threads > 0 ? num_threads
                                 : (int)std::thread::hardware_concurrency();

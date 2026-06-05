@@ -33,6 +33,12 @@ def test_detect_wrong_dtype_raises():
         det.detect(np.zeros((480, 640), dtype=np.float32))
 
 
+def test_detect_empty_frame_raises():
+    det = nf.ArucoDetector()
+    with pytest.raises(ValueError):
+        det.detect(np.zeros((0, 640), dtype=np.uint8))
+
+
 @pytest.mark.parametrize("dictionary",
                          [nf.Dict.ARUCO_MIP_36h12, nf.Dict.APRILTAG_36h11])
 @pytest.mark.parametrize("marker_id", [0, 1, 7, 42])

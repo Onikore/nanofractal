@@ -62,6 +62,16 @@ inline cv::Mat as_mat(const RawArray &arr) {
         "image must be uint8 (H,W) grayscale or (H,W,3) BGR, C-contiguous");
 }
 
+// Like as_mat but also rejects degenerate (0-size) images. Detection entry points
+// use this so an empty frame yields a clear ValueError instead of an opaque
+// OpenCV assertion failure deep in the detector.
+inline cv::Mat as_image(const RawArray &arr) {
+    cv::Mat m = as_mat(arr);
+    if (m.rows == 0 || m.cols == 0)
+        throw nb::value_error("image is empty");
+    return m;
+}
+
 // Build an owned numpy array by copying a flat vector. The heap vector is freed
 // when numpy releases the capsule.
 template <typename T>
