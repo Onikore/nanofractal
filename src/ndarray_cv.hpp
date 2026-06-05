@@ -20,6 +20,7 @@ using RawArray = nb::ndarray<nb::numpy>;
 // acceptable here.
 using F32Arr = nb::ndarray<const float, nb::c_contig, nb::device::cpu>;
 using F64Arr = nb::ndarray<const double, nb::c_contig, nb::device::cpu>;
+using I32Arr = nb::ndarray<const int32_t, nb::c_contig, nb::device::cpu>;
 
 // Validate dtype==uint8 and C-contiguous on the raw (uncoerced) ndarray.
 inline void validate_image_array(const RawArray &arr) {

@@ -110,6 +110,36 @@ class FractalDetector:
         corners = np.ascontiguousarray(result.corners, dtype=np.float32)
         return self._d.estimate_pose(p2d, p3d, corners, cam, dist)
 
+    def draw(self, image: np.ndarray, result: DetectionResult,
+             camera_matrix: np.ndarray | None = None,
+             dist_coeffs: np.ndarray | None = None,
+             rvec: np.ndarray | None = None, tvec: np.ndarray | None = None,
+             axis_length: float | None = None) -> np.ndarray:
+        """Draw marker outlines (+ ids) on ``image`` in place; with a pose
+        (``camera_matrix``, ``dist_coeffs``, ``rvec``, ``tvec``) also draw the
+        frame axes. ``image`` must be a writable contiguous uint8 array, BGR for
+        colour. ``axis_length`` defaults to half ``marker_size``. Returns ``image``.
+        """
+        if not image.flags["WRITEABLE"]:
+            raise ValueError("image must be writable")
+        corners = np.ascontiguousarray(result.corners, dtype=np.float32)
+        ids = np.ascontiguousarray(result.ids, dtype=np.int32)
+        axes = all(v is not None
+                   for v in (camera_matrix, dist_coeffs, rvec, tvec))
+        if axes:
+            cam = np.ascontiguousarray(camera_matrix, dtype=np.float64)
+            dist = np.ascontiguousarray(dist_coeffs, dtype=np.float64)
+            rv = np.ascontiguousarray(np.asarray(rvec, dtype=np.float64).reshape(3))
+            tv = np.ascontiguousarray(np.asarray(tvec, dtype=np.float64).reshape(3))
+            if axis_length is None:
+                axis_length = (self.marker_size if self.marker_size > 0 else 1.0) * 0.5
+        else:
+            cam = dist = rv = tv = np.zeros(0, dtype=np.float64)
+            axis_length = 0.0
+        self._d.draw(image, corners, ids, bool(axes), cam, dist, rv, tv,
+                     float(axis_length))
+        return image
+
 
 __all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector",
            "FractalDetector"]

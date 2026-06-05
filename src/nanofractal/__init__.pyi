@@ -51,3 +51,13 @@ class FractalDetector:
         camera_matrix: npt.NDArray[np.float64],
         dist_coeffs: npt.NDArray[np.float64],
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float] | None: ...
+    def draw(
+        self,
+        image: npt.NDArray[np.uint8],
+        result: DetectionResult,
+        camera_matrix: npt.NDArray[np.float64] | None = ...,
+        dist_coeffs: npt.NDArray[np.float64] | None = ...,
+        rvec: npt.NDArray[np.float64] | None = ...,
+        tvec: npt.NDArray[np.float64] | None = ...,
+        axis_length: float | None = ...,
+    ) -> npt.NDArray[np.uint8]: ...

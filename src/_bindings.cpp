@@ -7,6 +7,7 @@
 #include <thread>
 #include <atomic>
 #include <cmath>
+#include <string>
 #include "ndarray_cv.hpp"
 #include "aruco_nano_v6.h"
 #include "aruco_dicts.hpp"
@@ -338,6 +339,43 @@ struct FractalDetectorImpl {
         return nb::make_tuple(make_owned<double>(std::move(r), {(size_t)3}),
                               make_owned<double>(std::move(t), {(size_t)3}), rms);
     }
+
+    // Draw detected marker outlines (+ id) and, when axes=true, the pose frame
+    // axes onto `image` in place. `image` must be a writable, contiguous uint8
+    // array (BGR for colour). Uses the linked OpenCV (no cv2 on the Python side).
+    void draw(RawArray image, F32Arr corners, I32Arr ids, bool axes,
+              F64Arr cam, F64Arr dist, F64Arr rvec, F64Arr tvec,
+              double axis_length) {
+        cv::Mat im = as_image(image);
+        int lw = std::max(1, im.cols / 500);
+        cv::Scalar green(0, 255, 0), red(0, 0, 255), blue(255, 0, 0);
+        size_t N = (corners.ndim() == 3 && corners.shape(1) == 4 &&
+                    corners.shape(2) == 2) ? corners.shape(0) : 0;
+        size_t nids = (ids.ndim() == 1) ? ids.shape(0) : 0;
+        for (size_t i = 0; i < N; i++) {
+            cv::Point2f c[4];
+            for (int k = 0; k < 4; k++)
+                c[k] = cv::Point2f(corners.data()[i * 8 + k * 2 + 0],
+                                   corners.data()[i * 8 + k * 2 + 1]);
+            for (int k = 0; k < 4; k++)
+                cv::line(im, c[k], c[(k + 1) % 4], green, lw);
+            cv::circle(im, c[0], 3 * lw, red, -1);  // first corner
+            if (i < nids) {
+                cv::Point2f cen = (c[0] + c[1] + c[2] + c[3]) * 0.25f;
+                cv::putText(im, std::to_string(ids.data()[i]), cen,
+                            cv::FONT_HERSHEY_SIMPLEX,
+                            std::max(0.4, im.cols / 1500.0), blue, lw, cv::LINE_AA);
+            }
+        }
+        if (axes) {
+            cv::Mat camMat(3, 3, CV_64F, const_cast<double *>(cam.data()));
+            cv::Mat distMat((int)dist.shape(0), 1, CV_64F,
+                            const_cast<double *>(dist.data()));
+            cv::Mat rv(3, 1, CV_64F, const_cast<double *>(rvec.data()));
+            cv::Mat tv(3, 1, CV_64F, const_cast<double *>(tvec.data()));
+            cv::drawFrameAxes(im, camMat, distMat, rv, tv, (float)axis_length, lw);
+        }
+    }
 };
 
 NB_MODULE(_nanofractal, m) {
@@ -414,7 +452,11 @@ NB_MODULE(_nanofractal, m) {
              nb::arg("images"), nb::arg("num_threads") = 0)
         .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
              nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("corners"),
-             nb::arg("camera_matrix"), nb::arg("dist_coeffs"));
+             nb::arg("camera_matrix"), nb::arg("dist_coeffs"))
+        .def("draw", &FractalDetectorImpl::draw, nb::arg("image"),
+             nb::arg("corners"), nb::arg("ids"), nb::arg("axes"), nb::arg("cam"),
+             nb::arg("dist"), nb::arg("rvec"), nb::arg("tvec"),
+             nb::arg("axis_length"));
 
     m.def("_fractal_external_id", [](std::string config) {
         nanofractal::FractalMarkerSet s(config);

@@ -167,3 +167,35 @@ def test_estimate_pose_no_marker_returns_none():
     cam = np.eye(3, dtype=np.float64)
     dist = np.zeros(5, dtype=np.float64)
     assert det.estimate_pose(res, cam, dist) is None
+
+
+def test_draw_corners_and_axes(render_fractal_external):
+    gray = render_fractal_external()
+    bgr = np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))  # (H,W,3)
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(bgr)
+    assert res.ids.shape[0] >= 1  # marker present so something gets drawn
+
+    # corners only
+    before = bgr.copy()
+    out = det.draw(bgr, res)
+    assert out is bgr
+    assert not np.array_equal(bgr, before)  # pixels changed
+    # green corner lines were drawn somewhere
+    assert (bgr[..., 1] == 255).any()
+
+    # with pose axes (must not raise)
+    cam, dist = _camera(bgr)
+    rvec, tvec, _ = det.estimate_pose(res, cam, dist)
+    det.draw(bgr, res, cam, dist, rvec, tvec)
+
+
+def test_draw_readonly_image_raises(render_fractal_external):
+    gray = render_fractal_external()
+    bgr = np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))
+    det = nf.FractalDetector(CONFIG, marker_size=0.85)
+    res = det.detect(bgr)
+    ro = bgr.copy()
+    ro.flags.writeable = False
+    with pytest.raises(ValueError):
+        det.draw(ro, res)  # drawing needs a writable image
