@@ -87,19 +87,33 @@ res = fdet.detect(image)
 print(res.ids, res.corners.shape)   # outer 4 corners of each fractal marker
 ```
 
-### Fractal inner points (occlusion-robust pose)
+### Fractal pose + visualization (occlusion-robust)
 
-Ask for every visible corner — outer **and** inner — as 2D/3D correspondences you
-can feed straight into `cv2.solvePnP`:
+`FractalDetector.estimate_pose` returns one marker pose `(rvec, tvec, reproj_err)`
+or `None`. It uses every visible inner **and** outer corner correspondence when
+available (accurate, robust to occlusion) and otherwise falls back to the four
+outer corners — so you never call `solvePnP` yourself or worry about the
+empty-inner-points case. `reproj_err` (RMS pixels) lets you gate noisy poses.
 
 ```python
-res = fdet.detect(image, with_inner_points=True)
-res.points_2d   # float32 (M, 2) image points
-res.points_3d   # float32 (M, 3) object points (planar, z = 0)
+fdet = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.85)  # size in metres
 
-import cv2
-ok, rvec, tvec = cv2.solvePnP(res.points_3d, res.points_2d,
-                              camera_matrix, dist_coeffs)
+res = fdet.detect(image, with_inner_points=True)
+pose = fdet.estimate_pose(res, camera_matrix, dist_coeffs)
+if pose is not None:
+    rvec, tvec, reproj_err = pose      # rvec, tvec: float64 (3,); reproj_err: px
+    fdet.draw(image, res, camera_matrix, dist_coeffs, rvec, tvec)  # corners + axes
+```
+
+`draw(image, result, ...)` overlays marker outlines, ids and (given a pose) the
+frame axes in place — no `cv2.polylines`/`drawFrameAxes` boilerplate. Without a
+pose, `fdet.draw(image, res)` just draws the outlines.
+
+The raw correspondences are still exposed if you prefer to run PnP yourself:
+
+```python
+res.points_2d   # float32 (M, 2) image points  (None unless with_inner_points=True)
+res.points_3d   # float32 (M, 3) object points (planar, z = 0)
 ```
 
 ### Parallel batch (offline throughput)
@@ -134,6 +148,12 @@ for r in results:
   returned in metres (otherwise normalized).
 - `detect(image, with_inner_points=False) -> DetectionResult`
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
+- `estimate_pose(result, camera_matrix, dist_coeffs) -> (rvec, tvec, reproj_err) | None`
+  — single-marker pose; uses inner+outer points when ≥ 4, else the 4 outer
+  corners; `rvec`/`tvec` are float64 `(3,)`, `reproj_err` is RMS pixels.
+- `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None) -> image`
+  — draw outlines + ids (and frame axes when a pose is given) in place; `image`
+  must be a writable BGR `uint8` array.
 
 ### `DetectionResult`
 | field | dtype / shape | meaning |
