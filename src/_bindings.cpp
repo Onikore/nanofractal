@@ -379,6 +379,16 @@ struct FractalDetectorImpl {
 };
 
 NB_MODULE(_nanofractal, m) {
+    // Silence nanobind's shutdown "leaked instances" warning. It is a benign
+    // cosmetic diagnostic: it fires whenever user code still holds a detector
+    // reference at interpreter teardown (e.g. a VideoCapture worker thread left
+    // running after Ctrl+C, or an interactive shell pinning the frame via
+    // sys.last_traceback). Nothing actually leaks during operation and the OS
+    // reclaims the memory at exit; the bindings hold no Python references. The
+    // library cannot release a reference owned by user code, so the only
+    // library-side lever is to disable the warning itself.
+    nb::set_leak_warnings(false);
+
     m.attr("__version__") = NF_VERSION;
     m.def("_opencv_version", []() { return std::string(cv::getVersionString()); });
 
