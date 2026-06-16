@@ -20,6 +20,11 @@ build-dir = "build/{wheel_tag}"
 wheel.packages = ["src/nanofractal"]
 cmake.build-type = "Release"
 
+# Forward NF_MARCH from the environment into CMake so CI can set
+# an ISA baseline (x86-64-v3) without touching the CMakeLists.
+[tool.scikit-build.cmake.define]
+NF_MARCH = {env = "NF_MARCH", default = ""}
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 
@@ -34,5 +39,6 @@ test-command = "python -m pytest {project}/tests -q --ignore {project}/tests/tes
 
 [tool.cibuildwheel.linux]
 archs = ["x86_64"]
-# Point our CMake find_package(OpenCV) at the static build from before-all.
-environment = { CMAKE_PREFIX_PATH = "/opt/opencv-static" }
+# CMAKE_PREFIX_PATH: static OpenCV built by before-all.
+# NF_MARCH: x86-64-v3 = AVX2+FMA+BMI (Haswell 2013+); safe floor for 2024 machines.
+environment = { CMAKE_PREFIX_PATH = "/opt/opencv-static", NF_MARCH = "x86-64-v3" }

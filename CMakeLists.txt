@@ -29,6 +29,28 @@ target_link_libraries(_nanofractal PRIVATE ${OpenCV_LIBS})
 target_compile_options(_nanofractal PRIVATE
   $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O3>)
 
+# ---------------------------------------------------------------------------
+# Architecture & FP tuning (GCC / Clang only; MSVC is skipped silently).
+#
+#   -DNF_NATIVE=ON          local dev: -march=native -ffast-math
+#   -DNF_MARCH=x86-64-v3   portable:  -march=<isa>  -ffast-math (CI wheels)
+#
+# x86-64-v3 = AVX2 + FMA + BMI1/2 (Haswell 2013+).  Enables auto-vectorisation
+# of inner pixel loops without breaking pre-Skylake CPUs in the wild.
+# ffast-math: allows fp-reassociation and removes errno overhead; safe for
+# this library (no signalling NaNs produced, no errno-dependent callers).
+# ---------------------------------------------------------------------------
+option(NF_NATIVE "Enable -march=native -ffast-math (local dev only; not for distributed wheels)" OFF)
+set(NF_MARCH "" CACHE STRING "ISA baseline passed to -march= (e.g. x86-64-v3). Used in CI wheels.")
+
+if(NOT MSVC)
+  if(NF_NATIVE)
+    target_compile_options(_nanofractal PRIVATE -march=native -ffast-math)
+  elseif(NF_MARCH)
+    target_compile_options(_nanofractal PRIVATE -march=${NF_MARCH} -ffast-math)
+  endif()
+endif()
+
 # Single source of truth for the version: injected by scikit-build-core from
 # pyproject.toml. Falls back for non-skbuild direct cmake builds.
 if(DEFINED SKBUILD_PROJECT_VERSION)
