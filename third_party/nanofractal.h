@@ -667,7 +667,9 @@ void kfilter(std::vector<cv::KeyPoint> &kpoints)
         //Duplicated keypoints (closer)
         for(uint32_t xj=xi+1; xj<kpoints.size();xj++)
         {
-            if(pow(kpoints[xi].pt.x - kpoints[xj].pt.x,2) + pow(kpoints[xi].pt.y - kpoints[xj].pt.y,2) < 100)
+            float _dx = kpoints[xi].pt.x - kpoints[xj].pt.x;
+            float _dy = kpoints[xi].pt.y - kpoints[xj].pt.y;
+            if(_dx*_dx + _dy*_dy < 100.f)
             {
                 if(kpoints[xj].response > kpoints[xi].response)
                     kpoints[xi] = kpoints[xj];
@@ -747,7 +749,10 @@ void assignClass(const cv::Mat &im, std::vector<cv::KeyPoint>& kpoints, float si
         }
 
         uchar newLab = 1;
-        std::map<uchar, uchar> unions;
+        // Plain array replaces std::map: labels are uchar 1..wsizeFull²,
+        // always < 256. Zero means "not yet merged" (label 0 is never assigned).
+        uchar unions[256] = {};
+        int union_count = 0;
         for(int y=0; y<thresIm.rows; y++){
             uchar *thresPtr=thresIm.ptr<uchar>(y);
             uchar *labelsPtr=labels.ptr<uchar>(y);
@@ -771,11 +776,13 @@ void assignClass(const cv::Mat &im, std::vector<cv::KeyPoint>& kpoints, float si
                     if(lleft_px < ltop_px)
                     {
                         labelsPtr[x]  = lleft_px;
+                        if(unions[ltop_px] == 0) union_count++;
                         unions[ltop_px] = lleft_px;
                     }
                     else if(lleft_px > ltop_px)
                     {
                         labelsPtr[x]  = ltop_px;
+                        if(unions[lleft_px] == 0) union_count++;
                         unions[lleft_px] = ltop_px;
                     }
                     //Same
@@ -787,7 +794,7 @@ void assignClass(const cv::Mat &im, std::vector<cv::KeyPoint>& kpoints, float si
             }
         }
 
-        int nc= newLab-1 - unions.size();
+        int nc= newLab-1 - union_count;
         if(nc==2)
             if(nZ > thresIm.total()-nZ) kp.class_id = 0;
             else kp.class_id = 1;
@@ -807,8 +814,8 @@ public:
     FractalMarker(){};
 
     inline int nBits() { return _M.total(); }
-    inline cv::Mat mat(){ return _M; }
-    inline cv::Mat mask(){ return _mask; }
+    inline cv::Mat mat()  const { return _M; }
+    inline cv::Mat mask() const { return _mask; }
     inline std::vector<int> subMarkers(){ return _submarkers; }
     void addSubFractalMarker(FractalMarker submarker);
     // returns the distance of the marker side
@@ -1486,16 +1493,7 @@ int  FractalMarkerDetector::perimeter(const std::vector<cv::Point2f>& a)
 
 int FractalMarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, const std::vector<int>& markersId, const FractalMarkerSet& fmset){
 
-    auto rotate=[](const cv::Mat& in)
-    {
-        cv::Mat out(in.size(),in.type());
-        for (int i = 0; i < in.rows; i++)
-            for (int j = 0; j < in.cols; j++)
-                out.at<uchar>(i, j) = in.at<uchar>(in.cols - j - 1, i);
-        return out;
-    };
-
-     //first check that outer is all black
+    //first check that outer is all black
     for(int x=0;x<bits.cols;x++){
         if( bits.at<uchar>(0,x)!=0)return -1;
         if( bits.at<uchar>(bits.rows-1,x)!=0)return -1;
@@ -1503,29 +1501,48 @@ int FractalMarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, co
         if( bits.at<uchar>(x,bits.cols-1)!=0)return -1;
     }
 
-     //now, get the inner bits wo the black border
+    //now, get the inner bits wo the black border
     cv::Mat bit_inner(bits.cols-2,bits.rows-2,CV_8UC1);
     for(int r=0;r<bit_inner.rows;r++)
         for(int c=0;c<bit_inner.cols;c++)
             bit_inner.at<uchar>(r,c)=bits.at<uchar>(r+1,c+1);
 
+    const int sz = bit_inner.rows;  // always square (sqrt(nbits) x sqrt(nbits))
     nrotations = 0;
     do
     {
         for(auto idx:markersId)
         {
-            FractalMarker fm = fmset.fractalMarkerCollection.at(idx);
+            // const ref avoids copying the FractalMarker (which holds cv::Mat members)
+            const FractalMarker& fm = fmset.fractalMarkerCollection.at(idx);
+            // mat() / mask() return by-value but cv::Mat is ref-counted: header-only copy
+            cv::Mat ex = fm.mat();   // 0/1 values
+            cv::Mat mk = fm.mask();
 
-            //Apply mask to substract submarkers
-
-            cv::Mat masked;
-            bit_inner.copyTo(masked, fm.mask());
-
-            //Code without submarkers == fractal marker?
-            if (cv::countNonZero(masked != fm.mat()*255) == 0)
-                return idx;
+            // Early-exit pixel loop: bit_inner has 0/255, ex has 0/1.
+            // Compare only where mask is non-zero; bail on first mismatch.
+            bool match = true;
+            for(int r = 0; r < sz && match; r++){
+                const uchar* bi = bit_inner.ptr<uchar>(r);
+                const uchar* ex_row = ex.ptr<uchar>(r);
+                const uchar* mk_row = mk.ptr<uchar>(r);
+                for(int c = 0; c < sz && match; c++)
+                    if(mk_row[c] && bi[c] != (uchar)(ex_row[c] * 255))
+                        match = false;
+            }
+            if(match) return idx;
         }
-        bit_inner = rotate(bit_inner);
+        // Rotate bit_inner CW 90° using a stack buffer — same op count as
+        // the heap-allocating version but avoids malloc/free entirely.
+        // sz ≤ 13 for any supported marker set (13×13 = 169 ≤ 256).
+        uchar tmp[256];
+        for(int i = 0; i < sz; i++){
+            uchar* t = tmp + i * sz;
+            for(int j = 0; j < sz; j++)
+                t[j] = bit_inner.ptr<uchar>(sz - 1 - j)[i];
+        }
+        for(int i = 0; i < sz; i++)
+            memcpy(bit_inner.ptr<uchar>(i), tmp + i * sz, sz);
         nrotations++;
     } while (nrotations < 4);
 

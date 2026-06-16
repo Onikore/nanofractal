@@ -219,24 +219,20 @@ int  MarkerDetector::perimeter(const std::vector<cv::Point2f>& a)
 }
 int MarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, const std::vector<uint64_t> &dict){
 
-    //converts the inner code to a uint64_t value
-    auto   touulong=[](const cv::Mat& code)
+    // Convert inner code matrix to uint64_t (bit 0 = bottom-right pixel).
+    // Direct bit manipulation avoids std::bitset overhead.
+    auto touulong=[](const cv::Mat& code)
     {
-        std::bitset<64> bits;
+        uint64_t result = 0;
         int bidx = 0;
-        for (int y = code.rows - 1; y >= 0; y--)
+        for (int y = code.rows - 1; y >= 0; y--){
+            const uchar* row = code.ptr<uchar>(y);
             for (int x = code.cols - 1; x >= 0; x--)
-                bits[bidx++] = code.at<uchar>(y, x);
-        return bits.to_ullong();
+                result |= (uint64_t)(row[x] != 0) << bidx++;
+        }
+        return result;
     };
-    auto rotate=[](const cv::Mat& in)
-    {
-        cv::Mat out(in.size(),in.type());
-        for (int i = 0; i < in.rows; i++)
-            for (int j = 0; j < in.cols; j++)
-                out.at<uchar>(i, j) = in.at<uchar>(in.cols - j - 1, i);
-        return out;
-    };
+
     //first check that outer is all black
     for(int x=0;x<bits.cols;x++){
         if( bits.at<uchar>(0,x)!=0)return -1;
@@ -249,7 +245,16 @@ int MarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, const std
     for(int r=0;r<bit_inner.rows;r++)
         for(int c=0;c<bit_inner.cols;c++)
             bit_inner.at<uchar>(r,c)=bits.at<uchar>(r+1,c+1);
+
     //convert into numbers for the different rotations and check if the dictionary
+    auto rotate=[](const cv::Mat& in)
+    {
+        cv::Mat out(in.size(),in.type());
+        for (int i = 0; i < in.rows; i++)
+            for (int j = 0; j < in.cols; j++)
+                out.at<uchar>(i, j) = in.at<uchar>(in.cols - j - 1, i);
+        return out;
+    };
     nrotations = 0;
     do
     {
