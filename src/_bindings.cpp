@@ -9,6 +9,7 @@
 #include <cmath>
 #include <string>
 #include "ndarray_cv.hpp"
+#include "detector_params.h"
 #include "aruco_nano_v6.h"
 #include "aruco_dicts.hpp"
 #include "nanofractal.h"
@@ -21,7 +22,10 @@ namespace nb = nanobind;
 struct ArucoDetectorImpl {
     int dict;
     unsigned max_attempts;
-    ArucoDetectorImpl(int dictionary, unsigned attempts) {
+    DetectorParams params;
+
+    ArucoDetectorImpl(int dictionary, unsigned attempts, DetectorParams p = {})
+        : params(p) {
         if (dictionary != 0 && dictionary != 1)
             throw nb::value_error(
                 "dictionary must be 0 (ARUCO_MIP_36h12) or 1 (APRILTAG_36h11)");
@@ -35,7 +39,7 @@ struct ArucoDetectorImpl {
         {
             nb::gil_scoped_release rel;
             markers = aruconano::MarkerDetector::detect(
-                im, max_attempts, (aruconano::MarkerDetector::Dict)dict);
+                im, max_attempts, (aruconano::MarkerDetector::Dict)dict, params);
         }
         size_t n = markers.size();
         std::vector<int32_t> ids(n);
@@ -105,6 +109,7 @@ struct ArucoDetectorImpl {
         if (T > (int)N) T = (int)N;  // no point spawning more workers than images
         int dict_ = dict;
         unsigned attempts_ = max_attempts;
+        DetectorParams params_ = params;
         if (N > 0) {
             nb::gil_scoped_release rel;
             std::atomic<size_t> next{0};
@@ -112,7 +117,7 @@ struct ArucoDetectorImpl {
                 size_t i;
                 while ((i = next.fetch_add(1)) < N) {
                     auto markers = aruconano::MarkerDetector::detect(
-                        mats[i], attempts_, (aruconano::MarkerDetector::Dict)dict_);
+                        mats[i], attempts_, (aruconano::MarkerDetector::Dict)dict_, params_);
                     size_t n = markers.size();
                     all_ids[i].resize(n);
                     all_corners[i].resize(n * 8);
@@ -152,10 +157,11 @@ struct ArucoDetectorImpl {
 struct FractalDetectorImpl {
     std::string config;
     float marker_size;
+    DetectorParams params;
     std::vector<std::unique_ptr<nanofractal::FractalMarkerDetector>> pool;
 
-    FractalDetectorImpl(std::string cfg, float msize)
-        : config(std::move(cfg)), marker_size(msize) {
+    FractalDetectorImpl(std::string cfg, float msize, DetectorParams p = {})
+        : config(std::move(cfg)), marker_size(msize), params(p) {
         pool.push_back(make_detector());
     }
 
@@ -170,6 +176,7 @@ struct FractalDetectorImpl {
     std::unique_ptr<nanofractal::FractalMarkerDetector> make_detector() const {
         auto d = std::make_unique<nanofractal::FractalMarkerDetector>();
         d->setParams(config, marker_size > 0 ? marker_size : -1.f);
+        d->params = params;
         return d;
     }
 
@@ -439,12 +446,37 @@ NB_MODULE(_nanofractal, m) {
         return make_owned<uint8_t>(std::move(grid), {(size_t)8, (size_t)8});
     });
 
+    // ---- DetectorParams ----
+    nb::class_<DetectorParams>(m, "DetectorParams")
+        .def(nb::init<>())
+        .def_rw("min_contour_size",    &DetectorParams::min_contour_size,
+                "-1 = detector default (ArUco: 50, Fractal: 120)")
+        .def_rw("adaptive_block_size", &DetectorParams::adaptive_block_size,
+                "-1 = auto-scale with image width")
+        .def_rw("adaptive_c",          &DetectorParams::adaptive_c,
+                "constant subtracted from adaptive threshold mean (default 7)")
+        .def_rw("approx_poly_rate",    &DetectorParams::approx_poly_rate,
+                "contour approx epsilon = perimeter * rate (default 0.05)")
+        .def_rw("subpix_win_size",     &DetectorParams::subpix_win_size,
+                "corner sub-pixel half-window, Fractal only (-1 = default 4, 0 = off)")
+        .def_rw("kfilter_min_dist",    &DetectorParams::kfilter_min_dist,
+                "min distance (px) between FAST keypoints, Fractal only (default 10)")
+        .def("__repr__", [](const DetectorParams &p) {
+            return "DetectorParams(min_contour_size=" + std::to_string(p.min_contour_size) +
+                   ", adaptive_block_size=" + std::to_string(p.adaptive_block_size) +
+                   ", adaptive_c=" + std::to_string(p.adaptive_c) +
+                   ", approx_poly_rate=" + std::to_string(p.approx_poly_rate) +
+                   ", subpix_win_size=" + std::to_string(p.subpix_win_size) +
+                   ", kfilter_min_dist=" + std::to_string(p.kfilter_min_dist) + ")";
+        });
+
     // ---- ArUco Nano v6 ----
     nb::class_<ArucoDetectorImpl>(m, "ArucoDetector")
-        .def(nb::init<int, unsigned>(), nb::arg("dictionary"),
-             nb::arg("max_attempts"))
+        .def(nb::init<int, unsigned, DetectorParams>(), nb::arg("dictionary"),
+             nb::arg("max_attempts"), nb::arg("params") = DetectorParams{})
         .def_ro("max_attempts", &ArucoDetectorImpl::max_attempts)
         .def_ro("dictionary", &ArucoDetectorImpl::dict)
+        .def_rw("params", &ArucoDetectorImpl::params)
         .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"))
         .def("estimate_pose", &ArucoDetectorImpl::estimate_pose,
              nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
@@ -454,8 +486,9 @@ NB_MODULE(_nanofractal, m) {
 
     // ---- Fractal ----
     nb::class_<FractalDetectorImpl>(m, "FractalDetector")
-        .def(nb::init<std::string, float>(), nb::arg("config"),
-             nb::arg("marker_size"))
+        .def(nb::init<std::string, float, DetectorParams>(), nb::arg("config"),
+             nb::arg("marker_size"), nb::arg("params") = DetectorParams{})
+        .def_rw("params", &FractalDetectorImpl::params)
         .def("detect", &FractalDetectorImpl::detect, nb::arg("image"))
         .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"))
         .def("detect_batch", &FractalDetectorImpl::detect_batch,

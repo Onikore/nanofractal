@@ -60,6 +60,7 @@ limitations under the License.
 // (no highgui module) suffices; the detect path calls no highgui functions.
 #include <opencv2/calib3d.hpp>
 #include <bitset>
+#include "detector_params.h"
 
 namespace aruconano {
 /**
@@ -86,12 +87,12 @@ public:
     enum Dict:int{ARUCO_MIP_36h12=0,APRILTAG_36h11=1};
     //receives the input image and returns the detected markers. The second parameter allows to do multiple detection attempts for each
     // marker candidate. Introduces an small overhead, that is sometimes worth. If not, set this to one
-    static inline std::vector<Marker> detect(const cv::Mat &img,unsigned int maxAttemptsPerCandidate=10,Dict dict=ARUCO_MIP_36h12){
-        return _detect( img,maxAttemptsPerCandidate,dict);
+    static inline std::vector<Marker> detect(const cv::Mat &img,unsigned int maxAttemptsPerCandidate=10,Dict dict=ARUCO_MIP_36h12,DetectorParams params=DetectorParams{}){
+        return _detect( img,maxAttemptsPerCandidate,dict,params);
     }
 private:
     //obfuscate start
-    static inline std::vector<Marker> _detect(const cv::Mat &img,unsigned int maxAttemptsPerCandidate=10,Dict dict=ARUCO_MIP_36h12);
+    static inline std::vector<Marker> _detect(const cv::Mat &img,unsigned int maxAttemptsPerCandidate=10,Dict dict=ARUCO_MIP_36h12,DetectorParams params=DetectorParams{});
     static inline  Marker sort( const  Marker &marker);
     static inline  float  getSubpixelValue(const cv::Mat &im_grey,const cv::Point2f &p);
     static inline  int    getMarkerId(const cv::Mat &bits,int &nrotations,const std::vector<uint64_t> &dict);
@@ -120,7 +121,7 @@ std::vector<uint64_t> Dict_codes;
 }
 
 
-std::vector<Marker>  MarkerDetector::_detect(const cv::Mat &img, unsigned int maxAttemptsPerCandidate, Dict dict){
+std::vector<Marker>  MarkerDetector::_detect(const cv::Mat &img, unsigned int maxAttemptsPerCandidate, Dict dict, DetectorParams params){
      if(maxAttemptsPerCandidate==0) maxAttemptsPerCandidate=1;
     cv::Mat bwimage,thresImage;
     std::vector<Marker> DetectedMarkers;
@@ -136,7 +137,11 @@ std::vector<Marker>  MarkerDetector::_detect(const cv::Mat &img, unsigned int ma
         cv::cvtColor(img,bwimage,cv::COLOR_BGR2GRAY);
     else bwimage=img;
      /////////////////// Adaptive Threshold to detect border
-    cv::adaptiveThreshold(bwimage, thresImage, 255.,cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, 13, 7);
+    int _ablock = (params.adaptive_block_size == -1) ? 13 : params.adaptive_block_size;
+    if (_ablock < 3) _ablock = 3;
+    if (_ablock % 2 == 0) _ablock++;
+    int _minContour = (params.min_contour_size == -1) ? 50 : params.min_contour_size;
+    cv::adaptiveThreshold(bwimage, thresImage, 255.,cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, _ablock, params.adaptive_c);
     /////////////////// compute marker candidates by detecting contours
     std::vector<std::vector<cv::Point>> contours;
     std::vector<cv::Point> approxCurve;
@@ -147,9 +152,9 @@ std::vector<Marker>  MarkerDetector::_detect(const cv::Mat &img, unsigned int ma
     for (unsigned int i = 0; i < contours.size(); i++)
     {
         // check it is a possible element by first checking that is is large enough
-        if (50 > int(contours[i].size())  ) continue;
+        if (_minContour > int(contours[i].size())  ) continue;
         // can approximate to a convex rect?
-        cv::approxPolyDP(contours[i], approxCurve, double(contours[i].size()) * 0.05, true);
+        cv::approxPolyDP(contours[i], approxCurve, double(contours[i].size()) * params.approx_poly_rate, true);
         if (approxCurve.size() != 4 || !cv::isContourConvex(approxCurve)) continue;
         // add the points
         Marker marker;

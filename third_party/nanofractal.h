@@ -68,6 +68,7 @@
 #include <limits>
 #include <algorithm>
 #include <cstring>
+#include "detector_params.h"
 /**
  * The FractalMarkerDetector class detects fractal markers in the images passed
  *
@@ -644,7 +645,7 @@ struct PicoFlann_KeyPointAdapter{
 };
 
 /* KeyPoints Filter. Delete kpoints with low response and duplicated. */
-void kfilter(std::vector<cv::KeyPoint> &kpoints)
+void kfilter(std::vector<cv::KeyPoint> &kpoints, float min_dist_sq = 100.f)
 {
     if (kpoints.empty()) return;  // nanofractal patch: avoid kpoints[0] on empty (see PATCHES.md)
     float minResp = kpoints[0].response;
@@ -669,7 +670,7 @@ void kfilter(std::vector<cv::KeyPoint> &kpoints)
         {
             float _dx = kpoints[xi].pt.x - kpoints[xj].pt.x;
             float _dy = kpoints[xi].pt.y - kpoints[xj].pt.y;
-            if(_dx*_dx + _dy*_dy < 100.f)
+            if(_dx*_dx + _dy*_dy < min_dist_sq)
             {
                 if(kpoints[xj].response > kpoints[xi].response)
                     kpoints[xi] = kpoints[xj];
@@ -1240,6 +1241,10 @@ public:
     inline std::vector<FractalMarker> detect(const cv::Mat &img);
     inline std::vector<FractalMarker> detect(const cv::Mat &img, std::vector<cv::Point3f>& p3d,
                                              std::vector<cv::Point2f>& p2d);
+
+    // Tunable detection parameters. Changing these takes effect on the next detect() call.
+    DetectorParams params;
+
 private:
     FractalMarkerSet fractalMarkerSet;
     static inline  std::vector<cv::Point2f> sort( const  std::vector<cv::Point2f> &marker);
@@ -1260,6 +1265,7 @@ void FractalMarkerDetector::setParams(std::string config, float markerSize)
 std::vector<FractalMarker> FractalMarkerDetector::detect(const cv::Mat &img, std::vector<cv::Point3f>& p3d,
                                                   std::vector<cv::Point2f>& p2d)
 {
+    const int _subpix = (params.subpix_win_size == -1) ? 4 : params.subpix_win_size;
     cv::Mat bwimage;
     if(img.channels()==3)
         cv::cvtColor(img,bwimage,cv::COLOR_BGR2GRAY);
@@ -1290,7 +1296,7 @@ std::vector<FractalMarker> FractalMarkerDetector::detect(const cv::Mat &img, std
         cv::Ptr<cv::FastFeatureDetector> fd = cv::FastFeatureDetector::create();
         fd->detect(bwimage, kpoints);
         //Filter kpoints (low response) and removing duplicated.
-       _private::kfilter(kpoints);
+       _private::kfilter(kpoints, params.kfilter_min_dist * params.kfilter_min_dist);
         _private::assignClass(bwimage, kpoints);
 
         // nanofractal patch: with no FAST keypoints there are no inner points to
@@ -1360,12 +1366,12 @@ std::vector<FractalMarker> FractalMarkerDetector::detect(const cv::Mat &img, std
             }
         }
 
-        if(p2d.size()>0)
+        if(p2d.size()>0 && _subpix > 0)
         {
             //corner subpixel
-            cv::Size winSize = cv::Size(4, 4);
+            cv::Size winSize = cv::Size(_subpix, _subpix);
             cv::Size zeroZone = cv::Size( -1, -1 );
-            cv::TermCriteria criteria( cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005);      //cv::cornerSubPix(image, points, winSize, zeroZone, criteria);
+            cv::TermCriteria criteria( cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005);
             cornerSubPix(bwimage, p2d, winSize, zeroZone, criteria);
         }
     }
@@ -1373,6 +1379,7 @@ std::vector<FractalMarker> FractalMarkerDetector::detect(const cv::Mat &img, std
 }
 
 std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
+    const int _subpix = (params.subpix_win_size == -1) ? 4 : params.subpix_win_size;
 
     cv::Mat bwimage,thresImage;
 
@@ -1388,9 +1395,16 @@ std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
 
     ///////////////////////////////////////////////////
     // Adaptive Threshold to detect border
-    int adaptiveWindowSize=std::max(int(3),int(15*float(bwimage.cols)/1920.));
-    if( adaptiveWindowSize%2==0) adaptiveWindowSize++;
-    cv::adaptiveThreshold(bwimage, thresImage, 255.,cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, adaptiveWindowSize, 7);
+    int adaptiveWindowSize;
+    if (params.adaptive_block_size == -1) {
+        adaptiveWindowSize = std::max(int(3), int(15*float(bwimage.cols)/1920.));
+    } else {
+        adaptiveWindowSize = params.adaptive_block_size;
+        if (adaptiveWindowSize < 3) adaptiveWindowSize = 3;
+    }
+    if (adaptiveWindowSize % 2 == 0) adaptiveWindowSize++;
+    int _minContourF = (params.min_contour_size == -1) ? 120 : params.min_contour_size;
+    cv::adaptiveThreshold(bwimage, thresImage, 255.,cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, adaptiveWindowSize, params.adaptive_c);
 
     ///////////////////////////////////////////////////
     // compute marker candidates by detecting contours
@@ -1403,9 +1417,9 @@ std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
     for (unsigned int i = 0; i < contours.size(); i++)
     {
         // check it is a possible element by first checking that is is large enough
-        if (120 > int(contours[i].size())  ) continue;
+        if (_minContourF > int(contours[i].size())  ) continue;
         // can approximate to a convex rect?
-        cv::approxPolyDP(contours[i], approxCurve, double(contours[i].size()) * 0.05, true);
+        cv::approxPolyDP(contours[i], approxCurve, double(contours[i].size()) * params.approx_poly_rate, true);
 
         if (approxCurve.size() != 4 || !cv::isContourConvex(approxCurve)) continue;
         // add the points
@@ -1466,11 +1480,12 @@ std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
        if(candidates.size()>0){
            ////////////////////////////////////////////
            //finally subpixel corner refinement
-           int halfwsize= 4*float(bwimage.cols)/float(bwimage.cols) +0.5 ;
+           int halfwsize = (_subpix > 0) ? _subpix : 4;
            std::vector<cv::Point2f> Corners;
            for (const auto &m:candidates)
                Corners.insert(Corners.end(), m.second.begin(),m.second.end());
-           cv::cornerSubPix(bwimage, Corners, cv::Size(halfwsize,halfwsize), cv::Size(-1, -1),cv::TermCriteria( cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005));
+           if (_subpix > 0)
+               cv::cornerSubPix(bwimage, Corners, cv::Size(halfwsize,halfwsize), cv::Size(-1, -1),cv::TermCriteria( cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005));
            // copy back to the markers
            for (unsigned int i = 0; i < candidates.size(); i++)
            {

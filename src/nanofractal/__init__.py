@@ -12,6 +12,11 @@ __version__ = _nf.__version__
 # private module attribute — intentionally NOT part of the public __all__.
 _opencv_version = _nf._opencv_version
 
+# Re-export the C++ DetectorParams class directly — it is a nanobind type with
+# read/write attributes and a helpful __repr__. Python users can subclass it or
+# just set fields on an instance.
+DetectorParams = _nf.DetectorParams
+
 
 class Dict(IntEnum):
     ARUCO_MIP_36h12 = 0
@@ -31,13 +36,23 @@ class DetectionResult:
 
 class ArucoDetector:
     def __init__(self, dictionary: Dict = Dict.ARUCO_MIP_36h12,
-                 max_attempts: int = 1) -> None:
+                 max_attempts: int = 1,
+                 params: "DetectorParams | None" = None) -> None:
         self.dictionary = Dict(dictionary)
-        self._d = _nf.ArucoDetector(int(dictionary), int(max_attempts))
+        p = params if params is not None else _nf.DetectorParams()
+        self._d = _nf.ArucoDetector(int(dictionary), int(max_attempts), p)
 
     @property
     def max_attempts(self) -> int:
         return self._d.max_attempts
+
+    @property
+    def params(self) -> "DetectorParams":
+        return self._d.params
+
+    @params.setter
+    def params(self, value: "DetectorParams") -> None:
+        self._d.params = value
 
     def detect(self, image: np.ndarray) -> DetectionResult:
         ids, corners = self._d.detect(image)
@@ -66,13 +81,23 @@ _FRACTAL_CONFIGS = {"FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_
 
 
 class FractalDetector:
-    def __init__(self, config: str, marker_size: float = -1.0) -> None:
+    def __init__(self, config: str, marker_size: float = -1.0,
+                 params: "DetectorParams | None" = None) -> None:
         if config not in _FRACTAL_CONFIGS:
             raise ValueError(
                 f"invalid config {config!r}; use one of {sorted(_FRACTAL_CONFIGS)}")
         self.config = config
         self.marker_size = float(marker_size)
-        self._d = _nf.FractalDetector(config, float(marker_size))
+        p = params if params is not None else _nf.DetectorParams()
+        self._d = _nf.FractalDetector(config, float(marker_size), p)
+
+    @property
+    def params(self) -> "DetectorParams":
+        return self._d.params
+
+    @params.setter
+    def params(self, value: "DetectorParams") -> None:
+        self._d.params = value
 
     def detect(self, image: np.ndarray,
                with_inner_points: bool = False) -> DetectionResult:
@@ -141,5 +166,5 @@ class FractalDetector:
         return image
 
 
-__all__ = ["__version__", "Dict", "DetectionResult", "ArucoDetector",
-           "FractalDetector"]
+__all__ = ["__version__", "Dict", "DetectionResult", "DetectorParams",
+           "ArucoDetector", "FractalDetector"]
