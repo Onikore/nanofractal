@@ -22,11 +22,17 @@ curl -L -o opencv.tar.gz \
   "https://github.com/opencv/opencv/archive/refs/tags/${OPENCV_VERSION}.tar.gz"
 tar xzf opencv.tar.gz
 
+# SIMD: pin the baseline + runtime dispatch explicitly so the vectorised kernels
+# (adaptiveThreshold, resize, cornerSubPix) are always compiled and CPU-selected
+# at runtime, independent of OpenCV's per-version defaults. SSE4_2 is a safe
+# baseline for the x86-64-v3 wheel floor; AVX2/AVX512 are dispatched on top.
 cmake -S "opencv-${OPENCV_VERSION}" -B ocv-build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DBUILD_SHARED_LIBS=OFF \
+  -DCPU_BASELINE=SSE4_2 \
+  -DCPU_DISPATCH=AVX,AVX2,FP16,AVX512_SKX \
   -DBUILD_LIST=core,imgproc,calib3d,features2d \
   -DBUILD_opencv_apps=OFF -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF \
   -DBUILD_EXAMPLES=OFF -DBUILD_DOCS=OFF \

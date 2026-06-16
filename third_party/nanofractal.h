@@ -1392,19 +1392,31 @@ std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
         cv::cvtColor(img,bwimage,cv::COLOR_BGR2GRAY);
     else bwimage=img;
 
+    // Optional downscale (see DetectorParams::detection_scale): the costly
+    // threshold + contour + bit-decode stage runs on a smaller image; outer
+    // corners are mapped back and sub-pixel refined at full resolution. Inner
+    // fractal points are sampled afterwards from the full-resolution image.
+    float _scale = params.detection_scale;
+    if(!(_scale>0.f && _scale<1.f)) _scale = 1.f;
+    const float _inv_scale = 1.f/_scale;
+    cv::Mat procImage;
+    if(_scale<1.f) cv::resize(bwimage, procImage, cv::Size(), _scale, _scale, cv::INTER_AREA);
+    else           procImage = bwimage;
 
     ///////////////////////////////////////////////////
     // Adaptive Threshold to detect border
     int adaptiveWindowSize;
     if (params.adaptive_block_size == -1) {
-        adaptiveWindowSize = std::max(int(3), int(15*float(bwimage.cols)/1920.));
+        adaptiveWindowSize = std::max(int(3), int(15*float(procImage.cols)/1920.));
     } else {
         adaptiveWindowSize = params.adaptive_block_size;
         if (adaptiveWindowSize < 3) adaptiveWindowSize = 3;
     }
     if (adaptiveWindowSize % 2 == 0) adaptiveWindowSize++;
     int _minContourF = (params.min_contour_size == -1) ? 120 : params.min_contour_size;
-    cv::adaptiveThreshold(bwimage, thresImage, 255.,cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, adaptiveWindowSize, params.adaptive_c);
+    // keep the minimum marker size expressed in original-image pixels
+    if(_scale<1.f) _minContourF = std::max(4, int(_minContourF*_scale + 0.5f));
+    cv::adaptiveThreshold(procImage, thresImage, 255.,cv::ADAPTIVE_THRESH_MEAN_C, cv::THRESH_BINARY_INV, adaptiveWindowSize, params.adaptive_c);
 
     ///////////////////////////////////////////////////
     // compute marker candidates by detecting contours
@@ -1442,7 +1454,7 @@ std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
 
             for(int r=0;r<bits.rows;r++){
                 for(int c=0;c<bits.cols;c++){
-                    auto pixelValue=uchar(0.5+getSubpixelValue(bwimage,hom(cv::Point2f(  float(c+0.5) / float(bits.cols) ,  float(r+0.5) / float(bits.rows)  ))));
+                    auto pixelValue=uchar(0.5+getSubpixelValue(procImage,hom(cv::Point2f(  float(c+0.5) / float(bits.cols) ,  float(r+0.5) / float(bits.rows)  ))));
                     bits.at<uchar>(r,c)=pixelValue;
                     pixelSum+=pixelValue;
                 }
@@ -1479,6 +1491,10 @@ std::vector<FractalMarker>  FractalMarkerDetector::detect(const cv::Mat &img){
 
        if(candidates.size()>0){
            ////////////////////////////////////////////
+           // map detection-scale corners back to full resolution before refining
+           if(_scale<1.f)
+               for(auto &m:candidates)
+                   for(auto &pt:m.second){ pt.x*=_inv_scale; pt.y*=_inv_scale; }
            //finally subpixel corner refinement
            int halfwsize = (_subpix > 0) ? _subpix : 4;
            std::vector<cv::Point2f> Corners;
@@ -1516,13 +1532,17 @@ int FractalMarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, co
         if( bits.at<uchar>(x,bits.cols-1)!=0)return -1;
     }
 
-    //now, get the inner bits wo the black border
-    cv::Mat bit_inner(bits.cols-2,bits.rows-2,CV_8UC1);
-    for(int r=0;r<bit_inner.rows;r++)
-        for(int c=0;c<bit_inner.cols;c++)
-            bit_inner.at<uchar>(r,c)=bits.at<uchar>(r+1,c+1);
+    // Inner bits (without the black border) as a flat row-major stack array.
+    // sz <= 13 for any supported marker set (13x13 = 169 <= 256), so no heap
+    // allocation is needed for the inner grid or its rotations.
+    const int sz = bits.cols - 2;   // always square (sqrt(nbits) x sqrt(nbits))
+    uchar inner[256];
+    for(int r=0;r<sz;r++){
+        const uchar* row = bits.ptr<uchar>(r+1);
+        for(int c=0;c<sz;c++)
+            inner[r*sz+c] = row[c+1];   // 0/255 values, same as before
+    }
 
-    const int sz = bit_inner.rows;  // always square (sqrt(nbits) x sqrt(nbits))
     nrotations = 0;
     do
     {
@@ -1534,11 +1554,11 @@ int FractalMarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, co
             cv::Mat ex = fm.mat();   // 0/1 values
             cv::Mat mk = fm.mask();
 
-            // Early-exit pixel loop: bit_inner has 0/255, ex has 0/1.
+            // Early-exit pixel loop: inner has 0/255, ex has 0/1.
             // Compare only where mask is non-zero; bail on first mismatch.
             bool match = true;
             for(int r = 0; r < sz && match; r++){
-                const uchar* bi = bit_inner.ptr<uchar>(r);
+                const uchar* bi = inner + r*sz;
                 const uchar* ex_row = ex.ptr<uchar>(r);
                 const uchar* mk_row = mk.ptr<uchar>(r);
                 for(int c = 0; c < sz && match; c++)
@@ -1547,17 +1567,12 @@ int FractalMarkerDetector:: getMarkerId(const cv::Mat &bits, int &nrotations, co
             }
             if(match) return idx;
         }
-        // Rotate bit_inner CW 90° using a stack buffer — same op count as
-        // the heap-allocating version but avoids malloc/free entirely.
-        // sz ≤ 13 for any supported marker set (13×13 = 169 ≤ 256).
+        // Rotate inner CW 90 deg in a stack buffer: out(i,j) = in(sz-1-j, i).
         uchar tmp[256];
-        for(int i = 0; i < sz; i++){
-            uchar* t = tmp + i * sz;
-            for(int j = 0; j < sz; j++)
-                t[j] = bit_inner.ptr<uchar>(sz - 1 - j)[i];
-        }
         for(int i = 0; i < sz; i++)
-            memcpy(bit_inner.ptr<uchar>(i), tmp + i * sz, sz);
+            for(int j = 0; j < sz; j++)
+                tmp[i*sz+j] = inner[(sz-1-j)*sz + i];
+        memcpy(inner, tmp, (size_t)sz*sz);
         nrotations++;
     } while (nrotations < 4);
 

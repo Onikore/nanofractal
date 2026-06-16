@@ -29,4 +29,14 @@ struct DetectorParams {
     // Minimum distance (pixels) between FAST keypoints (Fractal only).
     // Keypoints within this radius are merged; higher = fewer, more spread-out points.
     float kfilter_min_dist    = 10.f;
+
+    // Downscale factor for the detection stage (both ArUco and Fractal). The
+    // expensive adaptive-threshold + contour + bit-decode stage runs on an image
+    // scaled by this factor; detected corners are mapped back and sub-pixel refined
+    // at full resolution, so accuracy loss stays sub-pixel as long as markers remain
+    // >= ~10 px after downscaling. (For Fractal, inner points are sampled from the
+    // full-resolution image afterwards.) 1.0 = full resolution (default); 0.5
+    // quarters the pixel count of the dominant stage (~4x faster). Values <=0 or
+    // >=1 mean no scaling. min_contour_size stays expressed in original-image pixels.
+    float detection_scale     = 1.f;
 };

@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "nanofractal"
-version = "0.1.1"
+version = "0.2.0"
 description = "High-performance fiducial marker detection (ArUco Nano v6 + Fractal)"
 readme = "README.md"
 requires-python = ">=3.9"

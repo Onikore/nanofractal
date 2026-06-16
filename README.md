@@ -13,6 +13,7 @@ during detection, and a **parallel batch** API scales across cores.
 
 ```text
 single-frame detect():   ~0.43 ms @ 640×480   ~1.0 ms @ 1280×720   ~3.1 ms @ 1920×1080
+detection_scale=0.5:     ~4× faster on the threshold/contour stage (corners refined at full res)
 batch detect_batch():    ~3.2× throughput on 4 threads
 ```
 
@@ -88,6 +89,20 @@ det = nf.ArucoDetector(nf.Dict.DICT_5X5_100, params=params)
 
 # Or change params after creation:
 det.params.min_contour_size = 80
+```
+
+For high-resolution input with reasonably large markers, `detection_scale` is the
+single biggest speed lever — the dominant cost (`adaptiveThreshold` + `findContours`)
+is already SIMD-optimized inside OpenCV, so the win comes from feeding it fewer
+pixels. Corners are still refined at full resolution, and it works for **both**
+`ArucoDetector` and `FractalDetector`:
+
+```python
+params = nf.DetectorParams()
+params.detection_scale = 0.5   # ~4x faster threshold/contour stage @1080p
+
+det  = nf.ArucoDetector(nf.Dict.DICT_4X4_50, params=params)
+fdet = nf.FractalDetector("FRACTAL_5L_6", params=params)
 ```
 
 FractalDetector also supports all the same parameters plus two extras:
@@ -223,6 +238,7 @@ original hard-coded behaviour so existing code needs no changes.
 | `approx_poly_rate` | `0.05` | Polygon approximation: `epsilon = perimeter × rate`. |
 | `subpix_win_size` | `-1` (auto=4) | Corner sub-pixel half-window **(Fractal only)**; `0` to disable. |
 | `kfilter_min_dist` | `10.0` | Minimum distance (px) between FAST keypoints **(Fractal only)**. |
+| `detection_scale` | `1.0` | Downscale factor for the detection stage **(both detectors)**. `0.5` runs threshold/contour/decode on ¼ the pixels (≈ 4× faster); corners are mapped back and sub-pixel refined at full resolution. `min_contour_size` stays in original-image pixels. |
 
 ### `DetectionResult`
 | field | dtype / shape | meaning |
@@ -252,6 +268,24 @@ never `None`.
   workers. The fractal detector is not thread-safe, so `detect_batch` uses a pool
   of independent detectors (one per worker). A single detector object is fine to
   call from one thread at a time.
+
+---
+
+## Changelog
+
+### 0.2.0
+- **`detection_scale`** — opt-in downscale of the threshold/contour/decode stage
+  for both detectors (~4× faster at 1080p; corners refined at full resolution).
+- **Lower-overhead decode** — ArUco dictionary tables are cached per detector
+  instead of rebuilt every frame; marker-id matching and rotation now run on
+  stack buffers with no per-candidate heap allocations (both detectors).
+- **Pinned SIMD** — CI wheels build OpenCV with an explicit `SSE4_2` baseline and
+  `AVX/AVX2/AVX512` runtime dispatch.
+
+### 0.1.x
+- Initial release: ArUco Nano v6 (all standard OpenCV dictionaries plus
+  `ARUCO_MIP_36h12` / AprilTag `36h11`), Fractal markers, pose, parallel batch,
+  and `DetectorParams` tuning.
 
 ---
 

@@ -17,6 +17,35 @@
 
 namespace nb = nanobind;
 
+// Pointer to the static, immutable marker-code table for a dictionary id, or
+// nullptr for an unknown id. The tables live in static storage (aruco_dicts /
+// aruco_std_dicts), so callers get a zero-copy handle they can cache and reuse
+// across frames instead of rebuilding the table on every detect() call.
+static const std::vector<uint64_t>* aruco_dict_codes(int dict) {
+    using D = aruconano::MarkerDetector::Dict;
+    switch ((D)dict) {
+    case D::ARUCO_MIP_36h12:  return &aruco_dicts::mip_36h12();
+    case D::APRILTAG_36h11:   return &aruco_dicts::apriltag_36h11();
+    case D::DICT_4X4_50:      return &aruco_std_dicts::DICT_4X4_50();
+    case D::DICT_4X4_100:     return &aruco_std_dicts::DICT_4X4_100();
+    case D::DICT_4X4_250:     return &aruco_std_dicts::DICT_4X4_250();
+    case D::DICT_4X4_1000:    return &aruco_std_dicts::DICT_4X4_1000();
+    case D::DICT_5X5_50:      return &aruco_std_dicts::DICT_5X5_50();
+    case D::DICT_5X5_100:     return &aruco_std_dicts::DICT_5X5_100();
+    case D::DICT_5X5_250:     return &aruco_std_dicts::DICT_5X5_250();
+    case D::DICT_5X5_1000:    return &aruco_std_dicts::DICT_5X5_1000();
+    case D::DICT_6X6_50:      return &aruco_std_dicts::DICT_6X6_50();
+    case D::DICT_6X6_100:     return &aruco_std_dicts::DICT_6X6_100();
+    case D::DICT_6X6_250:     return &aruco_std_dicts::DICT_6X6_250();
+    case D::DICT_6X6_1000:    return &aruco_std_dicts::DICT_6X6_1000();
+    case D::DICT_7X7_50:      return &aruco_std_dicts::DICT_7X7_50();
+    case D::DICT_7X7_100:     return &aruco_std_dicts::DICT_7X7_100();
+    case D::DICT_7X7_250:     return &aruco_std_dicts::DICT_7X7_250();
+    case D::DICT_7X7_1000:    return &aruco_std_dicts::DICT_7X7_1000();
+    }
+    return nullptr;
+}
+
 // ---- ArUco Nano v6 ----
 // Defined at namespace scope (not inside NB_MODULE) so it is a non-local type,
 // which is the conventional, portable way to use it as a nb::class_ template arg.
@@ -24,6 +53,9 @@ struct ArucoDetectorImpl {
     int dict;
     unsigned max_attempts;
     DetectorParams params;
+    // Cached zero-copy handle to the dictionary's code table (set once at
+    // construction). Shared read-only across detect_batch worker threads.
+    const std::vector<uint64_t>* codes = nullptr;
 
     ArucoDetectorImpl(int dictionary, unsigned attempts, DetectorParams p = {})
         : params(p) {
@@ -31,6 +63,7 @@ struct ArucoDetectorImpl {
             throw nb::value_error("dictionary must be a valid Dict enum value (0–17)");
         dict = dictionary;
         max_attempts = attempts ? attempts : 1u;
+        codes = aruco_dict_codes(dictionary);  // non-null: dictionary is validated
     }
 
     nb::tuple detect(RawArray arr) {
@@ -39,7 +72,7 @@ struct ArucoDetectorImpl {
         {
             nb::gil_scoped_release rel;
             markers = aruconano::MarkerDetector::detect(
-                im, max_attempts, (aruconano::MarkerDetector::Dict)dict, params);
+                im, max_attempts, (aruconano::MarkerDetector::Dict)dict, params, *codes);
         }
         size_t n = markers.size();
         std::vector<int32_t> ids(n);
@@ -110,6 +143,7 @@ struct ArucoDetectorImpl {
         int dict_ = dict;
         unsigned attempts_ = max_attempts;
         DetectorParams params_ = params;
+        const std::vector<uint64_t>* codes_ = codes;  // shared read-only
         if (N > 0) {
             nb::gil_scoped_release rel;
             std::atomic<size_t> next{0};
@@ -117,7 +151,7 @@ struct ArucoDetectorImpl {
                 size_t i;
                 while ((i = next.fetch_add(1)) < N) {
                     auto markers = aruconano::MarkerDetector::detect(
-                        mats[i], attempts_, (aruconano::MarkerDetector::Dict)dict_, params_);
+                        mats[i], attempts_, (aruconano::MarkerDetector::Dict)dict_, params_, *codes_);
                     size_t n = markers.size();
                     all_ids[i].resize(n);
                     all_corners[i].resize(n * 8);
@@ -426,32 +460,8 @@ NB_MODULE(_nanofractal, m) {
 
     // Render a marker as a (gsize x gsize) uint8 grid: black border + inner bits.
     // Bit ordering matches touulong() in aruco_nano_v6.h. Test/tool use only.
-    auto get_dict_codes = [](int dict) -> const std::vector<uint64_t>* {
-        using D = aruconano::MarkerDetector::Dict;
-        switch ((D)dict) {
-        case D::ARUCO_MIP_36h12:  return &aruco_dicts::mip_36h12();
-        case D::APRILTAG_36h11:   return &aruco_dicts::apriltag_36h11();
-        case D::DICT_4X4_50:      return &aruco_std_dicts::DICT_4X4_50();
-        case D::DICT_4X4_100:     return &aruco_std_dicts::DICT_4X4_100();
-        case D::DICT_4X4_250:     return &aruco_std_dicts::DICT_4X4_250();
-        case D::DICT_4X4_1000:    return &aruco_std_dicts::DICT_4X4_1000();
-        case D::DICT_5X5_50:      return &aruco_std_dicts::DICT_5X5_50();
-        case D::DICT_5X5_100:     return &aruco_std_dicts::DICT_5X5_100();
-        case D::DICT_5X5_250:     return &aruco_std_dicts::DICT_5X5_250();
-        case D::DICT_5X5_1000:    return &aruco_std_dicts::DICT_5X5_1000();
-        case D::DICT_6X6_50:      return &aruco_std_dicts::DICT_6X6_50();
-        case D::DICT_6X6_100:     return &aruco_std_dicts::DICT_6X6_100();
-        case D::DICT_6X6_250:     return &aruco_std_dicts::DICT_6X6_250();
-        case D::DICT_6X6_1000:    return &aruco_std_dicts::DICT_6X6_1000();
-        case D::DICT_7X7_50:      return &aruco_std_dicts::DICT_7X7_50();
-        case D::DICT_7X7_100:     return &aruco_std_dicts::DICT_7X7_100();
-        case D::DICT_7X7_250:     return &aruco_std_dicts::DICT_7X7_250();
-        case D::DICT_7X7_1000:    return &aruco_std_dicts::DICT_7X7_1000();
-        }
-        return nullptr;
-    };
-    m.def("_aruco_marker_image8", [get_dict_codes](int dict, int id) {
-        const std::vector<uint64_t>* codes = get_dict_codes(dict);
+    m.def("_aruco_marker_image8", [](int dict, int id) {
+        const std::vector<uint64_t>* codes = aruco_dict_codes(dict);
         if (!codes)
             throw nb::value_error("unknown dict id");
         if (id < 0 || (size_t)id >= codes->size())
@@ -485,13 +495,17 @@ NB_MODULE(_nanofractal, m) {
                 "corner sub-pixel half-window, Fractal only (-1 = default 4, 0 = off)")
         .def_rw("kfilter_min_dist",    &DetectorParams::kfilter_min_dist,
                 "min distance (px) between FAST keypoints, Fractal only (default 10)")
+        .def_rw("detection_scale",     &DetectorParams::detection_scale,
+                "downscale factor for the detection stage, both detectors "
+                "(1.0 = full res; 0.5 ~= 4x faster; corners refined at full res)")
         .def("__repr__", [](const DetectorParams &p) {
             return "DetectorParams(min_contour_size=" + std::to_string(p.min_contour_size) +
                    ", adaptive_block_size=" + std::to_string(p.adaptive_block_size) +
                    ", adaptive_c=" + std::to_string(p.adaptive_c) +
                    ", approx_poly_rate=" + std::to_string(p.approx_poly_rate) +
                    ", subpix_win_size=" + std::to_string(p.subpix_win_size) +
-                   ", kfilter_min_dist=" + std::to_string(p.kfilter_min_dist) + ")";
+                   ", kfilter_min_dist=" + std::to_string(p.kfilter_min_dist) +
+                   ", detection_scale=" + std::to_string(p.detection_scale) + ")";
         });
 
     // ---- ArUco Nano v6 ----
