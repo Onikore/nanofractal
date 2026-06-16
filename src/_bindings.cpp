@@ -12,6 +12,7 @@
 #include "detector_params.h"
 #include "aruco_nano_v6.h"
 #include "aruco_dicts.hpp"
+#include "aruco_std_dicts.hpp"
 #include "nanofractal.h"
 
 namespace nb = nanobind;
@@ -26,9 +27,8 @@ struct ArucoDetectorImpl {
 
     ArucoDetectorImpl(int dictionary, unsigned attempts, DetectorParams p = {})
         : params(p) {
-        if (dictionary != 0 && dictionary != 1)
-            throw nb::value_error(
-                "dictionary must be 0 (ARUCO_MIP_36h12) or 1 (APRILTAG_36h11)");
+        if (dictionary < 0 || dictionary > 17)
+            throw nb::value_error("dictionary must be a valid Dict enum value (0–17)");
         dict = dictionary;
         max_attempts = attempts ? attempts : 1u;
     }
@@ -424,26 +424,50 @@ NB_MODULE(_nanofractal, m) {
         return corners_to_numpy(std::move(c), 2);
     });
 
-    // Render an 8x8 cell grid (1-cell black border + 6x6 inner code) for a marker
-    // id, matching the bit ordering of touulong() in aruco_nano_v6.h. Test/tool use.
-    m.def("_aruco_marker_image8", [](int dict, int id) {
-        if (dict != 0 && dict != 1)
-            throw nb::value_error("dict must be 0 (mip_36h12) or 1 (apriltag_36h11)");
-        const std::vector<uint64_t> &codes =
-            dict == 0 ? aruco_dicts::mip_36h12() : aruco_dicts::apriltag_36h11();
-        if (id < 0 || (size_t)id >= codes.size())
+    // Render a marker as a (gsize x gsize) uint8 grid: black border + inner bits.
+    // Bit ordering matches touulong() in aruco_nano_v6.h. Test/tool use only.
+    auto get_dict_codes = [](int dict) -> const std::vector<uint64_t>* {
+        using D = aruconano::MarkerDetector::Dict;
+        switch ((D)dict) {
+        case D::ARUCO_MIP_36h12:  return &aruco_dicts::mip_36h12();
+        case D::APRILTAG_36h11:   return &aruco_dicts::apriltag_36h11();
+        case D::DICT_4X4_50:      return &aruco_std_dicts::DICT_4X4_50();
+        case D::DICT_4X4_100:     return &aruco_std_dicts::DICT_4X4_100();
+        case D::DICT_4X4_250:     return &aruco_std_dicts::DICT_4X4_250();
+        case D::DICT_4X4_1000:    return &aruco_std_dicts::DICT_4X4_1000();
+        case D::DICT_5X5_50:      return &aruco_std_dicts::DICT_5X5_50();
+        case D::DICT_5X5_100:     return &aruco_std_dicts::DICT_5X5_100();
+        case D::DICT_5X5_250:     return &aruco_std_dicts::DICT_5X5_250();
+        case D::DICT_5X5_1000:    return &aruco_std_dicts::DICT_5X5_1000();
+        case D::DICT_6X6_50:      return &aruco_std_dicts::DICT_6X6_50();
+        case D::DICT_6X6_100:     return &aruco_std_dicts::DICT_6X6_100();
+        case D::DICT_6X6_250:     return &aruco_std_dicts::DICT_6X6_250();
+        case D::DICT_6X6_1000:    return &aruco_std_dicts::DICT_6X6_1000();
+        case D::DICT_7X7_50:      return &aruco_std_dicts::DICT_7X7_50();
+        case D::DICT_7X7_100:     return &aruco_std_dicts::DICT_7X7_100();
+        case D::DICT_7X7_250:     return &aruco_std_dicts::DICT_7X7_250();
+        case D::DICT_7X7_1000:    return &aruco_std_dicts::DICT_7X7_1000();
+        }
+        return nullptr;
+    };
+    m.def("_aruco_marker_image8", [get_dict_codes](int dict, int id) {
+        const std::vector<uint64_t>* codes = get_dict_codes(dict);
+        if (!codes)
+            throw nb::value_error("unknown dict id");
+        if (id < 0 || (size_t)id >= codes->size())
             throw nb::value_error("marker id out of range");
-        uint64_t code = codes[id];
-
-        std::vector<uint8_t> grid(8 * 8, 0);  // border stays 0 (black)
+        uint64_t code = (*codes)[id];
+        int gsize = aruconano::MarkerDetector::dictGridSize(
+            (aruconano::MarkerDetector::Dict)dict);
+        int n_bits = gsize - 2;
+        std::vector<uint8_t> grid((size_t)(gsize * gsize), 0);
         int b = 0;
-        for (int y = 5; y >= 0; y--)
-            for (int x = 5; x >= 0; x--) {
-                int bit = (int)((code >> b) & 1ULL);
-                grid[(y + 1) * 8 + (x + 1)] = bit ? 255 : 0;  // +1 for border
-                b++;
+        for (int y = n_bits - 1; y >= 0; y--)
+            for (int x = n_bits - 1; x >= 0; x--) {
+                grid[(y + 1) * gsize + (x + 1)] = ((code >> b++) & 1ULL) ? 255 : 0;
             }
-        return make_owned<uint8_t>(std::move(grid), {(size_t)8, (size_t)8});
+        return make_owned<uint8_t>(std::move(grid),
+                                   {(size_t)gsize, (size_t)gsize});
     });
 
     // ---- DetectorParams ----

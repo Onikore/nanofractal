@@ -3,7 +3,8 @@
 High-performance fiducial-marker detection for Python. `nanofractal` wraps two
 compact, header-only C++ detectors with [nanobind](https://github.com/wjakob/nanobind):
 
-- **ArUco Nano v6** — square markers (`ARUCO_MIP_36h12` and AprilTag `36h11`).
+- **ArUco Nano v6** — square markers: all standard OpenCV ArUco dictionaries
+  (4×4, 5×5, 6×6, 7×7) plus `ARUCO_MIP_36h12` and AprilTag `36h11`.
 - **Fractal markers** — nested markers that stay detectable under heavy occlusion
   and expose many inner corner correspondences for accurate, long-range pose.
 
@@ -11,8 +12,8 @@ It is built for speed: **zero-copy** NumPy ↔ `cv::Mat`, the **GIL is released*
 during detection, and a **parallel batch** API scales across cores.
 
 ```text
-single-frame detect():   ~0.43 ms @ 640x480   ~1.3 ms @ 1280x720   ~2.9 ms @ 1920x1080
-batch detect_batch():    ~3.2x throughput on 4 threads
+single-frame detect():   ~0.43 ms @ 640×480   ~1.0 ms @ 1280×720   ~3.1 ms @ 1920×1080
+batch detect_batch():    ~3.2× throughput on 4 threads
 ```
 
 > Measured on a desktop CPU with `max_attempts=1`; your numbers will vary.
@@ -39,6 +40,13 @@ sudo apt-get install -y build-essential cmake libopencv-dev
 pip install .
 ```
 
+#### Local dev build with CPU tuning
+
+```bash
+# Enable -march=native + -ffast-math for maximum local performance:
+NF_NATIVE=1 pip install -e . --no-build-isolation
+```
+
 ---
 
 ## Quick start
@@ -47,18 +55,47 @@ Inputs are plain NumPy `uint8` arrays — either `(H, W)` grayscale or `(H, W, 3
 BGR, and **C-contiguous** (use `np.ascontiguousarray` if unsure). Any image loader
 works; the examples use OpenCV.
 
-### Detect ArUco / AprilTag markers
+### Detect ArUco markers
 
 ```python
 import cv2
 import nanofractal as nf
 
 image = cv2.imread("scene.png")                  # (H, W, 3) uint8 BGR
-det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12)  # or nf.Dict.APRILTAG_36h11
+
+# Standard 4×4 dictionary (50 unique markers)
+det = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
+
+# Or the legacy / AprilTag dictionaries:
+# det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12)
+# det = nf.ArucoDetector(nf.Dict.APRILTAG_36h11)
 
 res = det.detect(image)
 print(res.ids)        # int32   (N,)       e.g. [ 7 42]
 print(res.corners)    # float32 (N, 4, 2)  clockwise corners, subpixel
+```
+
+### Tune detection parameters
+
+```python
+params = nf.DetectorParams()
+params.min_contour_size    = 30    # detect smaller markers (default: 50)
+params.adaptive_block_size = 11    # adaptive threshold window (must be odd, ≥3)
+params.adaptive_c          = 7.0   # threshold constant (default: 7)
+params.approx_poly_rate    = 0.05  # polygon approx rate (default: 0.05)
+
+det = nf.ArucoDetector(nf.Dict.DICT_5X5_100, params=params)
+
+# Or change params after creation:
+det.params.min_contour_size = 80
+```
+
+FractalDetector also supports all the same parameters plus two extras:
+
+```python
+fparams = nf.DetectorParams()
+fparams.subpix_win_size  = 4    # corner sub-pixel half-window (0 = off)
+fparams.kfilter_min_dist = 10.0 # min pixel distance between FAST keypoints
 ```
 
 ### Estimate pose
@@ -132,20 +169,38 @@ for r in results:
 
 ## API
 
-### `ArucoDetector(dictionary=Dict.ARUCO_MIP_36h12, max_attempts=1)`
-- `dictionary: Dict` — `ARUCO_MIP_36h12` or `APRILTAG_36h11`.
+### `Dict` — marker dictionaries
+
+| Name | Markers | Inner bits | Notes |
+|------|---------|------------|-------|
+| `DICT_4X4_50` … `DICT_4X4_1000` | 50–1000 | 4×4 | fewest bits, fastest matching |
+| `DICT_5X5_50` … `DICT_5X5_1000` | 50–1000 | 5×5 | |
+| `DICT_6X6_50` … `DICT_6X6_1000` | 50–1000 | 6×6 | |
+| `DICT_7X7_50` … `DICT_7X7_1000` | 50–1000 | 7×7 | most bits, best error detection |
+| `ARUCO_MIP_36h12` | 250 | 6×6 | legacy ArUco MIP dictionary |
+| `APRILTAG_36h11` | 587 | 6×6 | AprilTag 36h11 |
+
+All dictionaries are identical to their OpenCV counterparts — markers printed
+with `cv2.aruco.generateImageMarker` are detected directly.
+
+### `ArucoDetector(dictionary=Dict.ARUCO_MIP_36h12, max_attempts=1, params=None)`
+- `dictionary: Dict` — any `Dict` enum value.
 - `max_attempts: int` — retries per candidate with small corner jitter. `1` is
   fastest (real-time default); raise (up to ~10) for harder images.
+- `params: DetectorParams | None` — tuning parameters (see below). `None` uses defaults.
+- `.params` — read/write access to the `DetectorParams` after creation.
 - `detect(image) -> DetectionResult`
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
 - `estimate_pose(corners, camera_matrix, dist_coeffs, marker_size) -> (rvecs, tvecs)`
   — `corners` is `(N, 4, 2)` float32; outputs are `(N, 3)` float64.
 
-### `FractalDetector(config, marker_size=-1.0)`
+### `FractalDetector(config, marker_size=-1.0, params=None)`
 - `config: str` — one of `FRACTAL_2L_6`, `FRACTAL_3L_6`, `FRACTAL_4L_6`,
   `FRACTAL_5L_6`.
 - `marker_size: float` — outer marker side in metres; if set, `points_3d` is
   returned in metres (otherwise normalized).
+- `params: DetectorParams | None` — tuning parameters. `None` uses defaults.
+- `.params` — read/write access to the `DetectorParams` after creation.
 - `detect(image, with_inner_points=False) -> DetectionResult`
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
 - `estimate_pose(result, camera_matrix, dist_coeffs) -> (rvec, tvec, reproj_err) | None`
@@ -154,6 +209,20 @@ for r in results:
 - `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None) -> image`
   — draw outlines + ids (and frame axes when a pose is given) in place; `image`
   must be a writable BGR `uint8` array.
+
+### `DetectorParams`
+
+Shared by both detectors. All fields are optional — defaults reproduce the
+original hard-coded behaviour so existing code needs no changes.
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `min_contour_size` | `-1` (auto) | Minimum contour perimeter in pixels. ArUco default: 50, Fractal: 120. |
+| `adaptive_block_size` | `-1` (auto) | Adaptive threshold block size (odd, ≥ 3). ArUco default: 13; Fractal: scales with image width. |
+| `adaptive_c` | `7.0` | Constant subtracted from the local threshold mean. |
+| `approx_poly_rate` | `0.05` | Polygon approximation: `epsilon = perimeter × rate`. |
+| `subpix_win_size` | `-1` (auto=4) | Corner sub-pixel half-window **(Fractal only)**; `0` to disable. |
+| `kfilter_min_dist` | `10.0` | Minimum distance (px) between FAST keypoints **(Fractal only)**. |
 
 ### `DetectionResult`
 | field | dtype / shape | meaning |

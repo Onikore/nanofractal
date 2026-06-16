@@ -20,7 +20,23 @@ DetectorParams = _nf.DetectorParams
 
 class Dict(IntEnum):
     ARUCO_MIP_36h12 = 0
-    APRILTAG_36h11 = 1
+    APRILTAG_36h11  = 1
+    DICT_4X4_50     = 2
+    DICT_4X4_100    = 3
+    DICT_4X4_250    = 4
+    DICT_4X4_1000   = 5
+    DICT_5X5_50     = 6
+    DICT_5X5_100    = 7
+    DICT_5X5_250    = 8
+    DICT_5X5_1000   = 9
+    DICT_6X6_50     = 10
+    DICT_6X6_100    = 11
+    DICT_6X6_250    = 12
+    DICT_6X6_1000   = 13
+    DICT_7X7_50     = 14
+    DICT_7X7_100    = 15
+    DICT_7X7_250    = 16
+    DICT_7X7_1000   = 17
 
 
 @dataclass
