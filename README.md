@@ -27,7 +27,7 @@ batch detect_batch():    ~3.2× throughput on 4 threads
 pip install nanofractal
 ```
 
-Wheels are available for x86_64 and aarch64 Linux (manylinux). They bundle a 
+Wheels are available for x86_64 and aarch64 Linux (manylinux). They bundle a
 minimal OpenCV, so no system OpenCV is required at runtime.
 
 ### Build from source
@@ -63,7 +63,7 @@ if unsure). Any image loader works; the examples use OpenCV.
 import nanofractal as nf
 
 # Generate a single 4×4 marker (id=7, 200×200 pixels, grayscale uint8)
-marker = nf.generate_aruco(marker_id=7, size_px=200, 
+marker = nf.generate_aruco(marker_id=7, size_px=200,
                            dictionary=nf.Dict.DICT_4X4_50, border_bits=1)
 
 # Generate the external level of a fractal marker
@@ -301,11 +301,11 @@ with `cv2.aruco.generateImageMarker` are detected directly.
 - `detect(image) -> DetectionResult`
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
 - `estimate_pose(corners, camera_matrix, dist_coeffs, marker_size, return_reproj=False, fisheye=False) -> (rvecs, tvecs) | (rvecs, tvecs, reproj_errs)`
-  — `corners` is `(N, 4, 2)` float32. When `return_reproj=True` returns `(rvecs, tvecs, reproj_errs)` 
-  where reproj_errs is float64 `(N,)` per-marker RMS error. `fisheye=True` uses OpenCV fisheye model 
+  — `corners` is `(N, 4, 2)` float32. When `return_reproj=True` returns `(rvecs, tvecs, reproj_errs)`
+  where reproj_errs is float64 `(N,)` per-marker RMS error. `fisheye=True` uses OpenCV fisheye model
   (dist_coeffs must be exactly 4).
 - `draw(image, result, camera_matrix=None, dist_coeffs=None, rvecs=None, tvecs=None, marker_size=None, axis_length=None, inplace=True) -> image`
-  — draw outlines + ids; with poses, also draw frame axes per marker. `inplace=True` (default) modifies and returns 
+  — draw outlines + ids; with poses, also draw frame axes per marker. `inplace=True` (default) modifies and returns
   the input; `inplace=False` returns a copy (accepts read-only input).
 
 ### `FractalDetector(config, marker_size=-1.0, params=None)`
@@ -319,10 +319,10 @@ with `cv2.aruco.generateImageMarker` are detected directly.
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
 - `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False) -> (rvec, tvec, reproj_err) | None`
   — single-marker pose; uses inner+outer points when ≥ 4, else the 4 outer
-  corners; `rvec`/`tvec` are float64 `(3,)`, `reproj_err` is RMS pixels. `fisheye=True` 
+  corners; `rvec`/`tvec` are float64 `(3,)`, `reproj_err` is RMS pixels. `fisheye=True`
   uses OpenCV fisheye model (dist_coeffs must be exactly 4).
 - `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None, inplace=True) -> image`
-  — draw outlines + ids (and frame axes when a pose is given). `inplace=True` (default) modifies 
+  — draw outlines + ids (and frame axes when a pose is given). `inplace=True` (default) modifies
   and returns the input; `inplace=False` returns a copy.
 
 ### `DetectorParams`
@@ -366,7 +366,7 @@ never `None`.
 | `dict_grid_size(d: Dict)` | `int` | Full grid size (including border) for a dictionary. |
 | `dict_num_markers(d: Dict)` | `int` | Number of markers in a dictionary. |
 
-**Note on `generate_fractal`:** Returns only the outermost marker level, which is 
+**Note on `generate_fractal`:** Returns only the outermost marker level, which is
 detectable by `FractalDetector`. It is **not** a full multi-level nested composite.
 
 ### `PoseSmoother`
