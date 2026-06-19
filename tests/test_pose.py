@@ -4,7 +4,6 @@ B – SOLVEPNP_IPPE_SQUARE correctness (reprojection guard).
 C – opt-in return_reproj parameter on ArucoDetector.estimate_pose.
 """
 
-import cv2
 import numpy as np
 import pytest
 
@@ -14,6 +13,27 @@ import nanofractal._nanofractal as _nf
 CONFIG = "FRACTAL_5L_6"
 MARKER_SIZE = 0.05  # metres, ArUco
 FRACTAL_SIZE = 0.85  # metres, Fractal
+
+
+def _rodrigues(rvec):
+    rvec = np.asarray(rvec, dtype=np.float64).reshape(3)
+    theta = np.linalg.norm(rvec)
+    if theta < 1e-12:
+        return np.eye(3)
+    k = rvec / theta
+    K = np.array([[0, -k[2], k[1]], [k[2], 0, -k[0]], [-k[1], k[0], 0]])
+    return np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * (K @ K)
+
+
+def _project_pinhole(obj, rvec, tvec, cam):
+    """Pinhole projection (zero distortion) — independent of cv2 so the wheel
+    test environment (pytest + numpy only, no cv2) can run it."""
+    R = _rodrigues(rvec)
+    P = (R @ np.asarray(obj, dtype=np.float64).T).T + np.asarray(tvec, float).reshape(3)
+    x = P[:, 0] / P[:, 2]
+    y = P[:, 1] / P[:, 2]
+    fx, fy, cx, cy = cam[0, 0], cam[1, 1], cam[0, 2], cam[1, 2]
+    return np.stack([fx * x + cx, fy * y + cy], axis=1)
 
 
 # ---------------------------------------------------------------------------
@@ -99,8 +119,7 @@ def test_aruco_pose_reprojection_error_small(aruco_frontal):
     for idx in range(len(rvecs)):
         rvec = rvecs[idx]
         tvec = tvecs[idx]
-        proj, _ = cv2.projectPoints(obj, rvec, tvec, cam, dist)
-        proj = proj.reshape(4, 2)
+        proj = _project_pinhole(obj, rvec, tvec, cam)
         detected = corners[idx]
         rms = float(np.sqrt(np.mean(np.sum((proj - detected) ** 2, axis=1))))
         assert rms < 2.0, f"RMS reprojection error too large: {rms:.3f} px (marker slot {idx})"
