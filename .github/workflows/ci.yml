@@ -20,4 +20,9 @@ jobs:
       - name: Build and install
         run: pip install -e ".[test]"
       - name: Run tests
-        run: python -m pytest tests -q --ignore tests/test_benchmarks.py
+        run: python -m pytest tests -q --ignore tests/test_benchmarks.py --cov=nanofractal --cov-report=term-missing --cov-report=xml
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          fail_ci_if_error: false

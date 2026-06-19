@@ -1,0 +1,41 @@
+name: asan
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  asan:
+    name: ASAN/UBSan (ubuntu-latest, Python 3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install OpenCV dev headers
+        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
+
+      - name: Build with ASAN/UBSan
+        # Pass NF_SANITIZE=ON to CMake via scikit-build-core config settings.
+        # CMAKE_ARGS is kept as a belt-and-suspenders fallback understood by
+        # older scikit-build; scikit-build-core >=0.10 honours -C cmake.define.*
+        env:
+          CMAKE_ARGS: "-DNF_SANITIZE=ON"
+        run: |
+          pip install scikit-build-core nanobind numpy pytest
+          pip install --no-build-isolation \
+            -C cmake.define.NF_SANITIZE=ON \
+            -e .
+
+      - name: Run tests under sanitizers
+        env:
+          ASAN_OPTIONS: "detect_leaks=1:halt_on_error=0:abort_on_error=0"
+          PYTHONMALLOC: "malloc"
+        run: |
+          LD_PRELOAD="$(gcc -print-file-name=libasan.so)" \
+            python -m pytest tests -q --ignore tests/test_benchmarks.py

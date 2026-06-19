@@ -64,6 +64,19 @@ if(NOT MSVC)
   endif()
 endif()
 
+# ---------------------------------------------------------------------------
+# Memory-safety build (AddressSanitizer + UBSan) — CI only, never for wheels.
+#
+#   cmake -DNF_SANITIZE=ON  (or scikit-build-core: -C cmake.define.NF_SANITIZE=ON)
+#
+# OFF by default: normal builds and wheels are completely unaffected.
+# ---------------------------------------------------------------------------
+option(NF_SANITIZE "Build with AddressSanitizer + UBSan (CI memory-safety job; not for wheels)" OFF)
+if(NF_SANITIZE AND NOT MSVC)
+  target_compile_options(_nanofractal PRIVATE -fsanitize=address,undefined -fno-omit-frame-pointer -g)
+  target_link_options(_nanofractal PRIVATE -fsanitize=address,undefined)
+endif()
+
 # Single source of truth for the version: injected by scikit-build-core from
 # pyproject.toml. Falls back for non-skbuild direct cmake builds.
 if(DEFINED SKBUILD_PROJECT_VERSION)

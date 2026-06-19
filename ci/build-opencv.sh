@@ -6,13 +6,16 @@
 set -euo pipefail
 
 OPENCV_VERSION="${OPENCV_VERSION:-4.10.0}"
-PREFIX="${OPENCV_PREFIX:-/opt/opencv-static}"
+PREFIX="${OPENCV_CACHE_DIR:-/project/.opencv-cache}"
 
-if [ -f "$PREFIX/lib64/cmake/opencv4/OpenCVConfig.cmake" ] || \
-   [ -f "$PREFIX/lib/cmake/opencv4/OpenCVConfig.cmake" ]; then
-  echo "OpenCV already installed at $PREFIX — skipping build."
+# Short-circuit on cache hit — checked before any package installs so a
+# restored actions/cache is respected without touching the network.
+if [ -f "$PREFIX/lib/libopencv_core.a" ] || [ -f "$PREFIX/lib64/libopencv_core.a" ]; then
+  echo "OpenCV cache hit at $PREFIX — skipping build."
   exit 0
 fi
+
+mkdir -p "$PREFIX"
 
 # zlib is the only external dependency of the selected modules.
 yum install -y zlib-devel || dnf install -y zlib-devel || true

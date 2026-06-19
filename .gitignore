@@ -11,3 +11,10 @@ _skbuild/
 .pypirc
 .env
 docs/
+.opencv-cache/
+# coverage + example output artifacts
+.coverage
+coverage.xml
+htmlcov/
+detected.png
+pose_estimation.png

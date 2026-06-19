@@ -14,6 +14,7 @@
 #include <opencv2/calib3d.hpp> // solvePnP, projectPoints, cv::fisheye
 #include <opencv2/core.hpp>
 #include <opencv2/features2d.hpp> // FastFeatureDetector, used by nanofractal.h
+#include <opencv2/imgproc.hpp>    // cornerSubPix, cvtColor
 #include <string>
 #include <thread>
 
@@ -118,23 +119,28 @@ struct ArucoDetectorImpl {
     codes = aruco_dict_codes(dictionary); // non-null: dictionary is validated
   }
 
-  nb::tuple detect(RawArray arr) {
+  nb::tuple detect(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
+                   int rh = -1) {
     cv::Mat im = as_image(arr);
+    bool has_roi = (rw > 0 && rh > 0);
+    cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
     std::vector<aruconano::Marker> markers;
     {
       nb::gil_scoped_release rel;
       markers = aruconano::MarkerDetector::detect(
-          im, max_attempts, (aruconano::MarkerDetector::Dict)dict, params,
+          work, max_attempts, (aruconano::MarkerDetector::Dict)dict, params,
           *codes);
     }
     size_t n = markers.size();
     std::vector<int32_t> ids(n);
     std::vector<float> corners(n * 8);
+    float ox = has_roi ? (float)rx : 0.f;
+    float oy = has_roi ? (float)ry : 0.f;
     for (size_t i = 0; i < n; i++) {
       ids[i] = markers[i].id;
       for (int c = 0; c < 4; c++) {
-        corners[i * 8 + c * 2 + 0] = markers[i][c].x;
-        corners[i * 8 + c * 2 + 1] = markers[i][c].y;
+        corners[i * 8 + c * 2 + 0] = markers[i][c].x + ox;
+        corners[i * 8 + c * 2 + 1] = markers[i][c].y + oy;
       }
     }
     return nb::make_tuple(ids_to_numpy(std::move(ids)),
@@ -246,11 +252,15 @@ struct ArucoDetectorImpl {
   // held), detection runs GIL-released across a thread pool, then results are
   // marshaled to numpy (GIL held).
   std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
-                                       int num_threads) {
+                                       int num_threads, int rx = -1,
+                                       int ry = -1, int rw = -1, int rh = -1) {
+    bool has_roi = (rw > 0 && rh > 0);
     size_t N = imgs.size();
     std::vector<cv::Mat> mats(N);
-    for (size_t i = 0; i < N; i++)
-      mats[i] = as_image(imgs[i]);
+    for (size_t i = 0; i < N; i++) {
+      cv::Mat full_im = as_image(imgs[i]);
+      mats[i] = has_roi ? full_im(cv::Rect(rx, ry, rw, rh)) : full_im;
+    }
 
     std::vector<std::vector<int32_t>> all_ids(N);
     std::vector<std::vector<float>> all_corners(N);
@@ -264,6 +274,8 @@ struct ArucoDetectorImpl {
     unsigned attempts_ = max_attempts;
     DetectorParams params_ = params;
     const std::vector<uint64_t> *codes_ = codes; // shared read-only
+    float ox_ = has_roi ? (float)rx : 0.f;
+    float oy_ = has_roi ? (float)ry : 0.f;
     if (N > 0) {
       nb::gil_scoped_release rel;
       std::atomic<size_t> next{0};
@@ -279,8 +291,8 @@ struct ArucoDetectorImpl {
           for (size_t k = 0; k < n; k++) {
             all_ids[i][k] = markers[k].id;
             for (int c = 0; c < 4; c++) {
-              all_corners[i][k * 8 + c * 2 + 0] = markers[k][c].x;
-              all_corners[i][k * 8 + c * 2 + 1] = markers[k][c].y;
+              all_corners[i][k * 8 + c * 2 + 0] = markers[k][c].x + ox_;
+              all_corners[i][k * 8 + c * 2 + 1] = markers[k][c].y + oy_;
             }
           }
         }
@@ -377,42 +389,62 @@ struct FractalDetectorImpl {
     }
   }
 
-  nb::tuple detect(RawArray arr) {
+  nb::tuple detect(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
+                   int rh = -1) {
     cv::Mat im = as_image(arr);
+    bool has_roi = (rw > 0 && rh > 0);
+    cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
     std::vector<nanofractal::FractalMarker> markers;
     {
       nb::gil_scoped_release rel;
-      markers = pool[0]->detect(im);
+      markers = pool[0]->detect(work);
     }
     std::vector<int32_t> ids;
     std::vector<float> corners;
     fill(markers, ids, corners);
     size_t n = ids.size();
+    // Offset corners to full-image coordinates when an ROI was used.
+    if (has_roi) {
+      for (size_t i = 0; i < n * 8; i += 2) {
+        corners[i + 0] += (float)rx;
+        corners[i + 1] += (float)ry;
+      }
+    }
     return nb::make_tuple(ids_to_numpy(std::move(ids)),
                           corners_to_numpy(std::move(corners), n));
   }
 
   // detect + all visible (inner) corner correspondences for occlusion-robust
   // pose: returns (ids, corners, points_2d (M,2), points_3d (M,3)).
-  nb::tuple detect_full(RawArray arr) {
+  nb::tuple detect_full(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
+                        int rh = -1) {
     cv::Mat im = as_image(arr);
+    bool has_roi = (rw > 0 && rh > 0);
+    cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
     std::vector<nanofractal::FractalMarker> markers;
     std::vector<cv::Point3f> p3d;
     std::vector<cv::Point2f> p2d;
     {
       nb::gil_scoped_release rel;
-      markers = pool[0]->detect(im, p3d, p2d);
+      markers = pool[0]->detect(work, p3d, p2d);
     }
     std::vector<int32_t> ids;
     std::vector<float> corners;
     fill(markers, ids, corners);
     size_t n = ids.size();
+    // Offset corners and 2-D points to full-image coordinates.
+    if (has_roi) {
+      for (size_t i = 0; i < n * 8; i += 2) {
+        corners[i + 0] += (float)rx;
+        corners[i + 1] += (float)ry;
+      }
+    }
 
     size_t m2 = p2d.size();
     std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
     for (size_t i = 0; i < m2; i++) {
-      pts2[i * 2 + 0] = p2d[i].x;
-      pts2[i * 2 + 1] = p2d[i].y;
+      pts2[i * 2 + 0] = p2d[i].x + (has_roi ? (float)rx : 0.f);
+      pts2[i * 2 + 1] = p2d[i].y + (has_roi ? (float)ry : 0.f);
       pts3[i * 3 + 0] = p3d[i].x;
       pts3[i * 3 + 1] = p3d[i].y;
       pts3[i * 3 + 2] = p3d[i].z;
@@ -426,11 +458,15 @@ struct FractalDetectorImpl {
   // Parallel batch detection. The fractal detector is not thread-safe, so each
   // worker thread t uses its own pool[t] (built once, lazily grown to T).
   std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
-                                       int num_threads) {
+                                       int num_threads, int rx = -1,
+                                       int ry = -1, int rw = -1, int rh = -1) {
+    bool has_roi = (rw > 0 && rh > 0);
     size_t N = imgs.size();
     std::vector<cv::Mat> mats(N);
-    for (size_t i = 0; i < N; i++)
-      mats[i] = as_image(imgs[i]);
+    for (size_t i = 0; i < N; i++) {
+      cv::Mat full_im = as_image(imgs[i]);
+      mats[i] = has_roi ? full_im(cv::Rect(rx, ry, rw, rh)) : full_im;
+    }
 
     int T = num_threads > 0 ? num_threads
                             : (int)std::thread::hardware_concurrency();
@@ -441,6 +477,8 @@ struct FractalDetectorImpl {
     while ((int)pool.size() < T)
       pool.push_back(make_detector());
 
+    float ox_ = has_roi ? (float)rx : 0.f;
+    float oy_ = has_roi ? (float)ry : 0.f;
     std::vector<std::vector<int32_t>> all_ids(N);
     std::vector<std::vector<float>> all_corners(N);
     if (N > 0) {
@@ -451,6 +489,12 @@ struct FractalDetectorImpl {
         while ((i = next.fetch_add(1)) < N) {
           auto markers = pool[t]->detect(mats[i]);
           fill(markers, all_ids[i], all_corners[i]);
+          if (has_roi) {
+            for (size_t j = 0; j < all_corners[i].size(); j += 2) {
+              all_corners[i][j + 0] += ox_;
+              all_corners[i][j + 1] += oy_;
+            }
+          }
         }
       };
       std::vector<std::thread> ths;
@@ -688,13 +732,16 @@ NB_MODULE(_nanofractal, m) {
       .def_ro("max_attempts", &ArucoDetectorImpl::max_attempts)
       .def_ro("dictionary", &ArucoDetectorImpl::dict)
       .def_rw("params", &ArucoDetectorImpl::params)
-      .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"))
+      .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"),
+           nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
+           nb::arg("rh") = -1)
       .def("estimate_pose", &ArucoDetectorImpl::estimate_pose,
            nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
            nb::arg("marker_size"), nb::arg("return_reproj") = false,
            nb::arg("fisheye") = false)
       .def("detect_batch", &ArucoDetectorImpl::detect_batch, nb::arg("images"),
-           nb::arg("num_threads") = 0)
+           nb::arg("num_threads") = 0, nb::arg("rx") = -1, nb::arg("ry") = -1,
+           nb::arg("rw") = -1, nb::arg("rh") = -1)
       .def("draw", &ArucoDetectorImpl::draw, nb::arg("image"),
            nb::arg("corners"), nb::arg("ids"), nb::arg("axes"), nb::arg("cam"),
            nb::arg("dist"), nb::arg("rvecs"), nb::arg("tvecs"),
@@ -705,10 +752,15 @@ NB_MODULE(_nanofractal, m) {
       .def(nb::init<std::string, float, DetectorParams>(), nb::arg("config"),
            nb::arg("marker_size"), nb::arg("params") = DetectorParams{})
       .def_rw("params", &FractalDetectorImpl::params)
-      .def("detect", &FractalDetectorImpl::detect, nb::arg("image"))
-      .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"))
+      .def("detect", &FractalDetectorImpl::detect, nb::arg("image"),
+           nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
+           nb::arg("rh") = -1)
+      .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"),
+           nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
+           nb::arg("rh") = -1)
       .def("detect_batch", &FractalDetectorImpl::detect_batch,
-           nb::arg("images"), nb::arg("num_threads") = 0)
+           nb::arg("images"), nb::arg("num_threads") = 0, nb::arg("rx") = -1,
+           nb::arg("ry") = -1, nb::arg("rw") = -1, nb::arg("rh") = -1)
       .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
            nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("corners"),
            nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
@@ -733,6 +785,39 @@ NB_MODULE(_nanofractal, m) {
     if (!codes)
       throw nb::value_error("unknown dict id");
     return (int)codes->size();
+  });
+
+  // ---- B2: sub-pixel corner refinement ----
+  // Refines detected corners to sub-pixel accuracy via cv::cornerSubPix.
+  // Accepts grayscale (H,W) or BGR (H,W,3) uint8 images; converts to gray
+  // internally. corners must be float32 (N,4,2); returns float32 (N,4,2).
+  m.def("_refine_corners", [](RawArray arr, F32Arr corners, int win_size) {
+    cv::Mat im = as_mat(arr);
+    // Convert to single-channel; cornerSubPix requires grayscale.
+    cv::Mat gray;
+    if (im.channels() == 3)
+      cv::cvtColor(im, gray, cv::COLOR_BGR2GRAY);
+    else
+      gray = im;
+    if (corners.ndim() != 3 || corners.shape(1) != 4 || corners.shape(2) != 2)
+      throw nb::value_error("corners must be float32 (N, 4, 2)");
+    size_t N = corners.shape(0);
+    std::vector<cv::Point2f> pts;
+    pts.reserve(N * 4);
+    for (size_t i = 0; i < N * 4; i++)
+      pts.emplace_back(corners.data()[i * 2 + 0], corners.data()[i * 2 + 1]);
+    if (!pts.empty()) {
+      cv::TermCriteria crit(cv::TermCriteria::EPS + cv::TermCriteria::MAX_ITER,
+                            30, 0.01);
+      cv::cornerSubPix(gray, pts, cv::Size(win_size, win_size),
+                       cv::Size(-1, -1), crit);
+    }
+    std::vector<float> out(N * 8);
+    for (size_t i = 0; i < N * 4; i++) {
+      out[i * 2 + 0] = pts[i].x;
+      out[i * 2 + 1] = pts[i].y;
+    }
+    return make_owned<float>(std::move(out), {N, (size_t)4, (size_t)2});
   });
 
   m.def("_fractal_external_id", [](std::string config) {

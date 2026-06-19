@@ -93,6 +93,48 @@ def _validate_params(p: "DetectorParams") -> None:
         raise ValueError(f"detection_scale must be finite, got {ds}")
 
 
+def _validate_roi(roi, image: np.ndarray) -> tuple[int, int, int, int]:
+    """Validate an ROI tuple against an image and return ``(rx, ry, rw, rh)``.
+
+    Parameters
+    ----------
+    roi : sequence of 4 ints
+        ``(x, y, w, h)`` region of interest.
+    image : np.ndarray
+        The image the ROI will be applied to; only ``shape[:2]`` is used.
+
+    Returns
+    -------
+    tuple[int, int, int, int]
+        Validated ``(rx, ry, rw, rh)`` as Python ints.
+
+    Raises
+    ------
+    ValueError
+        With a descriptive message on any violation.
+    """
+    if not hasattr(roi, "__len__") or len(roi) != 4:
+        raise ValueError(f"roi must be a length-4 tuple of ints (x, y, w, h), got {roi!r}")
+    try:
+        rx, ry, rw, rh = int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"roi elements must be integers: {exc}") from exc
+    if rw <= 0:
+        raise ValueError(f"roi width must be > 0, got w={rw}")
+    if rh <= 0:
+        raise ValueError(f"roi height must be > 0, got h={rh}")
+    if rx < 0:
+        raise ValueError(f"roi x must be >= 0, got x={rx}")
+    if ry < 0:
+        raise ValueError(f"roi y must be >= 0, got y={ry}")
+    H, W = image.shape[:2]
+    if rx + rw > W:
+        raise ValueError(f"roi x+w ({rx}+{rw}={rx + rw}) exceeds image width ({W})")
+    if ry + rh > H:
+        raise ValueError(f"roi y+h ({ry}+{rh}={ry + rh}) exceeds image height ({H})")
+    return rx, ry, rw, rh
+
+
 def _draw_target(image: np.ndarray, inplace: bool) -> np.ndarray:
     """Resolve the array to draw onto for the detectors' ``draw`` methods.
 
@@ -187,15 +229,35 @@ class ArucoDetector:
     def __repr__(self) -> str:
         return f"ArucoDetector(dictionary={self.dictionary.name}, max_attempts={self.max_attempts})"
 
-    def detect(self, image: np.ndarray) -> DetectionResult:
+    def detect(
+        self,
+        image: np.ndarray,
+        roi: "tuple[int, int, int, int] | None" = None,
+    ) -> DetectionResult:
         _validate_params(self._d.params)
-        ids, corners = self._d.detect(image)
+        if roi is not None:
+            rx, ry, rw, rh = _validate_roi(roi, image)
+            ids, corners = self._d.detect(image, rx, ry, rw, rh)
+        else:
+            ids, corners = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners)
 
-    def detect_batch(self, images, num_threads: int = 0) -> list[DetectionResult]:
+    def detect_batch(
+        self,
+        images,
+        num_threads: int = 0,
+        roi: "tuple[int, int, int, int] | None" = None,
+    ) -> list[DetectionResult]:
         """Detect markers in many images in parallel (0 = use all cores)."""
         _validate_params(self._d.params)
-        results = self._d.detect_batch(list(images), int(num_threads))
+        imgs = list(images)
+        if roi is not None:
+            for img in imgs:
+                _validate_roi(roi, img)
+            rx, ry, rw, rh = int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])
+            results = self._d.detect_batch(imgs, int(num_threads), rx, ry, rw, rh)
+        else:
+            results = self._d.detect_batch(imgs, int(num_threads))
         return [DetectionResult(ids=i, corners=c) for i, c in results]
 
     def estimate_pose(
@@ -307,18 +369,42 @@ class FractalDetector:
     def __repr__(self) -> str:
         return f"FractalDetector(config={self.config!r}, marker_size={self.marker_size})"
 
-    def detect(self, image: np.ndarray, with_inner_points: bool = False) -> DetectionResult:
+    def detect(
+        self,
+        image: np.ndarray,
+        with_inner_points: bool = False,
+        roi: "tuple[int, int, int, int] | None" = None,
+    ) -> DetectionResult:
         _validate_params(self._d.params)
-        if with_inner_points:
-            ids, corners, p2d, p3d = self._d.detect_full(image)
-            return DetectionResult(ids=ids, corners=corners, points_2d=p2d, points_3d=p3d)
-        ids, corners = self._d.detect(image)
+        if roi is not None:
+            rx, ry, rw, rh = _validate_roi(roi, image)
+            if with_inner_points:
+                ids, corners, p2d, p3d = self._d.detect_full(image, rx, ry, rw, rh)
+                return DetectionResult(ids=ids, corners=corners, points_2d=p2d, points_3d=p3d)
+            ids, corners = self._d.detect(image, rx, ry, rw, rh)
+        else:
+            if with_inner_points:
+                ids, corners, p2d, p3d = self._d.detect_full(image)
+                return DetectionResult(ids=ids, corners=corners, points_2d=p2d, points_3d=p3d)
+            ids, corners = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners)
 
-    def detect_batch(self, images, num_threads: int = 0) -> list[DetectionResult]:
+    def detect_batch(
+        self,
+        images,
+        num_threads: int = 0,
+        roi: "tuple[int, int, int, int] | None" = None,
+    ) -> list[DetectionResult]:
         """Detect fractal markers in many images in parallel (0 = all cores)."""
         _validate_params(self._d.params)
-        results = self._d.detect_batch(list(images), int(num_threads))
+        imgs = list(images)
+        if roi is not None:
+            for img in imgs:
+                _validate_roi(roi, img)
+            rx, ry, rw, rh = int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])
+            results = self._d.detect_batch(imgs, int(num_threads), rx, ry, rw, rh)
+        else:
+            results = self._d.detect_batch(imgs, int(num_threads))
         return [DetectionResult(ids=i, corners=c) for i, c in results]
 
     def estimate_pose(
@@ -403,6 +489,105 @@ class FractalDetector:
         return target
 
 
+def refine_corners(
+    image: np.ndarray,
+    corners: np.ndarray,
+    win_size: int = 5,
+) -> np.ndarray:
+    """Refine detected corner positions to sub-pixel accuracy.
+
+    Wraps ``cv::cornerSubPix`` with a ``(win_size × win_size)`` search window
+    and stopping criteria ``EPS + MAX_ITER (30 iters, 0.01 px)``.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        Grayscale ``(H, W)`` or BGR ``(H, W, 3)`` uint8 image. The function
+        converts BGR to grayscale internally.
+    corners : np.ndarray
+        Detected corners, ``float32 (N, 4, 2)``, as returned by
+        :meth:`ArucoDetector.detect` or :meth:`FractalDetector.detect`.
+    win_size : int, optional
+        Half-size of the search window (must be >= 1). Default is 5.
+
+    Returns
+    -------
+    np.ndarray
+        Refined corners, ``float32 (N, 4, 2)``.
+
+    Raises
+    ------
+    ValueError
+        If ``win_size < 1``.
+    """
+    if win_size < 1:
+        raise ValueError(f"win_size must be >= 1, got {win_size}")
+    image = np.ascontiguousarray(image)
+    corners = np.ascontiguousarray(corners, dtype=np.float32)
+    return np.asarray(_nf._refine_corners(image, corners, int(win_size)))
+
+
+def to_opencv(
+    result: DetectionResult,
+) -> "tuple[list[np.ndarray], np.ndarray]":
+    """Convert a :class:`DetectionResult` to the ``cv2.aruco.detectMarkers`` format.
+
+    Parameters
+    ----------
+    result : DetectionResult
+        Detection result from :meth:`ArucoDetector.detect` or similar.
+
+    Returns
+    -------
+    corners : list[np.ndarray]
+        One ``float32 (1, 4, 2)`` array per detected marker — exactly the
+        format that ``cv2.aruco.detectMarkers`` returns for its *corners*
+        output.
+    ids : np.ndarray
+        ``int32 (N, 1)`` array of marker ids.  For an empty result returns
+        ``np.zeros((0, 1), np.int32)`` rather than ``None`` (unlike cv2).
+    """
+    n = len(result)
+    if n == 0:
+        return [], np.zeros((0, 1), dtype=np.int32)
+    corners = [result.corners[i].reshape(1, 4, 2).astype(np.float32) for i in range(n)]
+    ids = result.ids.reshape(-1, 1).astype(np.int32)
+    return corners, ids
+
+
+def from_opencv(corners, ids) -> DetectionResult:
+    """Build a :class:`DetectionResult` from ``cv2.aruco.detectMarkers`` output.
+
+    Parameters
+    ----------
+    corners : sequence of np.ndarray
+        Each element is ``(1, 4, 2)`` or ``(4, 2)`` float32, as returned by
+        ``cv2.aruco.detectMarkers``.
+    ids : np.ndarray or None
+        ``int32 (N, 1)`` or ``(N,)`` array of marker ids, or ``None``
+        (cv2 returns ``None`` when no markers are found).
+
+    Returns
+    -------
+    DetectionResult
+        ``points_2d`` and ``points_3d`` are always ``None`` (they are not
+        encoded in the cv2 format).
+    """
+    _empty = DetectionResult(
+        ids=np.zeros(0, dtype=np.int32),
+        corners=np.zeros((0, 4, 2), dtype=np.float32),
+    )
+    if ids is None:
+        return _empty
+    ids_arr = np.asarray(ids, dtype=np.int32).ravel()
+    n = len(ids_arr)
+    if n == 0:
+        return _empty
+    corners_list = [np.asarray(c, dtype=np.float32).reshape(4, 2) for c in corners]
+    corners_arr = np.stack(corners_list, axis=0)
+    return DetectionResult(ids=ids_arr, corners=corners_arr)
+
+
 def dict_grid_size(d: Dict) -> int:
     """Full marker grid size in cells including border.
 
@@ -437,4 +622,7 @@ __all__ = [
     "generate_aruco",
     "generate_fractal",
     "PoseSmoother",
+    "refine_corners",
+    "to_opencv",
+    "from_opencv",
 ]

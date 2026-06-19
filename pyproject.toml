@@ -4,7 +4,7 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "nanofractal"
-version = "0.3.0"
+version = "0.4.0"
 description = "High-performance fiducial marker detection (ArUco Nano v6 + Fractal)"
 readme = "README.md"
 requires-python = ">=3.9"
@@ -12,7 +12,8 @@ license = { text = "Apache-2.0" }
 dependencies = ["numpy>=1.21"]
 
 [project.optional-dependencies]
-test = ["pytest>=7", "pytest-benchmark>=4"]
+test = ["pytest>=7", "pytest-benchmark>=4", "pytest-cov>=4"]
+bench = ["opencv-python>=4.5"]
 
 [tool.scikit-build]
 minimum-version = "0.10"
@@ -36,6 +37,9 @@ skip = "*-musllinux* pp* *_i686 *-win32"
 before-all = "bash ci/build-opencv.sh"
 test-requires = "pytest numpy"
 test-command = "python -m pytest {project}/tests -q --ignore {project}/tests/test_benchmarks.py"
+# Under QEMU emulation aarch64 tests are very slow; run only one CPython to
+# keep wall-clock time reasonable. x86_64 runs all five (no skip pattern matches).
+test-skip = "cp39-*_aarch64 cp310-*_aarch64 cp311-*_aarch64 cp313-*_aarch64"
 
 [tool.cibuildwheel.linux]
 # aarch64 builds run under QEMU emulation in CI — expect them to be significantly
@@ -44,7 +48,7 @@ archs = ["x86_64", "aarch64"]
 # CMAKE_PREFIX_PATH: static OpenCV built by before-all.
 # NF_MARCH: x86-64-v3 = AVX2+FMA+BMI (Haswell 2013+); safe floor for 2024 machines.
 # CMakeLists.txt ignores NF_MARCH on aarch64 (see arch-tuning block).
-environment = { CMAKE_PREFIX_PATH = "/opt/opencv-static", NF_MARCH = "x86-64-v3" }
+environment = { CMAKE_PREFIX_PATH = "/project/.opencv-cache", NF_MARCH = "x86-64-v3" }
 
 [tool.ruff]
 line-length = 100

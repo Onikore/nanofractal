@@ -5,6 +5,34 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-06-19
+
+### Added
+- **ROI detection**: `detect(image, roi=(x, y, w, h))` (and `detect_batch`) on both
+  detectors — runs on a zero-copy sub-rectangle and returns corners in full-image
+  coordinates.
+- **`refine_corners(image, corners, win_size=5)`**: standalone subpixel corner
+  refinement (`cornerSubPix`).
+- **`to_opencv` / `from_opencv`**: converters between `DetectionResult` and the
+  `cv2.aruco` `(corners, ids)` format.
+- **`examples/`**: runnable scripts (`detect_image`, `pose_estimation`,
+  `batch_processing`, `webcam`).
+- **`benchmarks/`**: `compare_opencv.py` (head-to-head vs `cv2.aruco`) and
+  `robustness.py` (detection rate + pose error under blur / rotation / perspective
+  / noise / scale, synthetic ground truth) with a `real_images/` slot. `cv2` lives
+  in the optional `[bench]` extra.
+
+### Tooling / CI
+- **Coverage**: `pytest-cov` in CI (`--cov`) + Codecov badge.
+- **Memory safety**: optional `-DNF_SANITIZE=ON` build (ASan + UBSan) and an `asan`
+  CI job running the suite under sanitizers; plus 4K/8K and repeated-call tests.
+- **Faster releases**: static OpenCV is cached across releases (`actions/cache`),
+  the wheel build runs as a per-arch parallel matrix (x86_64 / aarch64), and
+  aarch64 wheels are tested on a single CPython under QEMU — cutting the previous
+  ~1 h aarch64 release time on cache hits.
+- Type stubs extended (`roi`, `refine_corners`, `to_opencv`, `from_opencv`);
+  `stubtest` stays green.
+
 ## [0.3.0] - 2026-06-19
 
 ### Added
@@ -67,6 +95,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GIL released during detection for multi-core batch scaling.
 - Portable `manylinux` wheels with a minimal static OpenCV linked in.
 
+[0.4.0]: https://github.com/Onikore/nanofractal/compare/v0.3.0...v0.4.0
+[0.4.0]: https://github.com/Onikore/nanofractal/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Onikore/nanofractal/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Onikore/nanofractal/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/Onikore/nanofractal/compare/v0.1.0...v0.1.1
