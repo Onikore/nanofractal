@@ -1,4 +1,5 @@
 """TDD: B2 — nf.refine_corners."""
+
 import numpy as np
 import pytest
 
@@ -20,6 +21,7 @@ def _render_aruco(marker_id: int = 0, dictionary: int = 0, cell: int = 40, margi
 
 
 # ── shape / dtype ─────────────────────────────────────────────────────────────
+
 
 def test_refine_output_shape_dtype():
     img = _render_aruco(0)
@@ -43,6 +45,7 @@ def test_refine_returns_new_array():
 
 # ── sanity: refined corners stay close to detected ───────────────────────────
 
+
 def test_refine_corners_close_to_detected():
     img = _render_aruco(0)
     det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
@@ -54,6 +57,7 @@ def test_refine_corners_close_to_detected():
 
 
 # ── win_size validation ───────────────────────────────────────────────────────
+
 
 def test_refine_win_size_zero_raises():
     img = _render_aruco(0)
@@ -73,6 +77,7 @@ def test_refine_win_size_negative_raises():
 
 # ── BGR (3-channel) input ─────────────────────────────────────────────────────
 
+
 def test_refine_bgr_image():
     gray = _render_aruco(0)
     bgr = np.ascontiguousarray(np.stack([gray, gray, gray], axis=-1))
@@ -89,6 +94,7 @@ def test_refine_bgr_image():
 
 # ── empty corners ─────────────────────────────────────────────────────────────
 
+
 def test_refine_empty_corners():
     img = _render_aruco(0)
     empty = np.zeros((0, 4, 2), dtype=np.float32)
@@ -98,6 +104,7 @@ def test_refine_empty_corners():
 
 
 # ── custom win_size ───────────────────────────────────────────────────────────
+
 
 def test_refine_custom_win_size():
     img = _render_aruco(0)

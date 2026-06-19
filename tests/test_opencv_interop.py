@@ -1,6 +1,6 @@
 """TDD: B3 — to_opencv / from_opencv converters. No cv2 import."""
+
 import numpy as np
-import pytest
 
 import nanofractal as nf
 
@@ -13,6 +13,7 @@ def _make_result(n: int = 3) -> nf.DetectionResult:
 
 
 # ── to_opencv ─────────────────────────────────────────────────────────────────
+
 
 def test_to_opencv_types():
     result = _make_result(3)
@@ -64,6 +65,7 @@ def test_to_opencv_empty_result():
 
 # ── from_opencv ───────────────────────────────────────────────────────────────
 
+
 def test_from_opencv_basic_shapes():
     result = _make_result(3)
     corners, ids = nf.to_opencv(result)
@@ -113,6 +115,7 @@ def test_from_opencv_points_2d_3d_none():
 
 # ── round-trip ────────────────────────────────────────────────────────────────
 
+
 def test_round_trip_preserves_ids():
     result = _make_result(5)
     corners, ids = nf.to_opencv(result)
@@ -138,6 +141,7 @@ def test_round_trip_empty():
 
 
 # ── in __all__ ────────────────────────────────────────────────────────────────
+
 
 def test_to_opencv_in_all():
     assert "to_opencv" in nf.__all__

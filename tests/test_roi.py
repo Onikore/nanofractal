@@ -1,4 +1,5 @@
 """TDD: B1 — ROI detection for ArucoDetector and FractalDetector."""
+
 import numpy as np
 import pytest
 
@@ -9,6 +10,7 @@ CONFIG = "FRACTAL_5L_6"
 
 
 # ── helpers ──────────────────────────────────────────────────────────────────
+
 
 def _upscale(grid8: np.ndarray, cell: int) -> np.ndarray:
     return np.kron(grid8, np.ones((cell, cell), dtype=np.uint8))
@@ -39,6 +41,7 @@ def _render_fractal_in_canvas(cell: int = 40, margin: int = 80):
 
 
 # ── ArucoDetector.detect ─────────────────────────────────────────────────────
+
 
 def test_aruco_roi_detect_finds_marker():
     img, ox, oy = _render_aruco_in_canvas(marker_id=0)
@@ -115,6 +118,7 @@ def test_aruco_roi_bad_length_raises():
 
 # ── ArucoDetector.detect_batch ───────────────────────────────────────────────
 
+
 def test_aruco_detect_batch_roi_finds_marker():
     img, ox, oy = _render_aruco_in_canvas(marker_id=0)
     det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
@@ -141,8 +145,8 @@ def test_aruco_detect_batch_roi_corners_in_full_image_coords():
 
 def test_aruco_detect_batch_roi_validates_each_image():
     """ROI that overflows a differently-sized image in the batch raises."""
-    img_big, _, _ = _render_aruco_in_canvas(margin=80)   # 480×480
-    img_small = img_big[: 200, : 200]                    # 200×200
+    img_big, _, _ = _render_aruco_in_canvas(margin=80)  # 480×480
+    img_small = img_big[:200, :200]  # 200×200
     det = nf.ArucoDetector()
     H, W = img_big.shape
     # roi fits img_big but not img_small
@@ -152,6 +156,7 @@ def test_aruco_detect_batch_roi_validates_each_image():
 
 
 # ── FractalDetector.detect ───────────────────────────────────────────────────
+
 
 def test_fractal_roi_detect_finds_marker():
     img, ox, oy = _render_fractal_in_canvas()
@@ -188,6 +193,7 @@ def test_fractal_roi_none_matches_no_roi():
 
 
 # ── FractalDetector.detect_batch ─────────────────────────────────────────────
+
 
 def test_fractal_detect_batch_roi_finds_marker():
     img, ox, oy = _render_fractal_in_canvas()
