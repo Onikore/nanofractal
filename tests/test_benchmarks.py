@@ -2,6 +2,7 @@ import time
 
 import numpy as np
 import pytest
+
 import nanofractal as nf
 import nanofractal._nanofractal as _nf
 
@@ -12,7 +13,7 @@ def _scene(width, height, marker_id=0, cell=40):
     up = np.kron(grid, np.ones((cell, cell), dtype=np.uint8))
     canvas = np.full((height, width), 255, dtype=np.uint8)
     h, w = up.shape
-    canvas[20:20 + h, 20:20 + w] = up
+    canvas[20 : 20 + h, 20 : 20 + w] = up
     return np.ascontiguousarray(canvas)
 
 
@@ -39,7 +40,9 @@ def test_aruco_batch_throughput_scaling(capsys):
     t1 = run(1)
     t4 = run(4)
     with capsys.disabled():
-        print(f"\nbatch 64 frames @720p: 1 thread={t1 * 1e3:.1f}ms  "
-              f"4 threads={t4 * 1e3:.1f}ms  speedup={t1 / t4:.2f}x")
+        print(
+            f"\nbatch 64 frames @720p: 1 thread={t1 * 1e3:.1f}ms  "
+            f"4 threads={t4 * 1e3:.1f}ms  speedup={t1 / t4:.2f}x"
+        )
     # Non-flaky guard: more threads must not be meaningfully slower than one.
     assert t4 <= t1 * 1.2

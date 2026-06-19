@@ -27,7 +27,8 @@ batch detect_batch():    ~3.2× throughput on 4 threads
 pip install nanofractal
 ```
 
-Wheels bundle a minimal OpenCV, so no system OpenCV is required at runtime.
+Wheels are available for x86_64 and aarch64 Linux (manylinux). They bundle a 
+minimal OpenCV, so no system OpenCV is required at runtime.
 
 ### Build from source
 
@@ -52,9 +53,23 @@ NF_NATIVE=1 pip install -e . --no-build-isolation
 
 ## Quick start
 
-Inputs are plain NumPy `uint8` arrays — either `(H, W)` grayscale or `(H, W, 3)`
-BGR, and **C-contiguous** (use `np.ascontiguousarray` if unsure). Any image loader
-works; the examples use OpenCV.
+Inputs are plain NumPy `uint8` arrays — either `(H, W)` grayscale, `(H, W, 1)`
+grayscale, or `(H, W, 3)` BGR, and **C-contiguous** (use `np.ascontiguousarray`
+if unsure). Any image loader works; the examples use OpenCV.
+
+### Generate ArUco markers
+
+```python
+import nanofractal as nf
+
+# Generate a single 4×4 marker (id=7, 200×200 pixels, grayscale uint8)
+marker = nf.generate_aruco(marker_id=7, size_px=200, 
+                           dictionary=nf.Dict.DICT_4X4_50, border_bits=1)
+
+# Generate the external level of a fractal marker
+config = "FRACTAL_5L_6"
+fractal = nf.generate_fractal(config, size_px=400)  # uint8 grayscale
+```
 
 ### Detect ArUco markers
 
@@ -72,8 +87,13 @@ det = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
 # det = nf.ArucoDetector(nf.Dict.APRILTAG_36h11)
 
 res = det.detect(image)
-print(res.ids)        # int32   (N,)       e.g. [ 7 42]
-print(res.corners)    # float32 (N, 4, 2)  clockwise corners, subpixel
+print(len(res))        # number of detected markers
+print(res.ids)         # int32   (N,)       e.g. [ 7 42]
+print(res.corners)     # float32 (N, 4, 2)  clockwise corners, subpixel
+
+# Iterate over results
+for marker_id, corners in res:
+    print(f"Marker {marker_id}: {corners}")
 ```
 
 ### Tune detection parameters
@@ -115,7 +135,7 @@ fparams.kfilter_min_dist = 10.0 # min pixel distance between FAST keypoints
 
 ### Estimate pose
 
-`estimate_pose` runs `solvePnP` (IPPE) for every detected marker at once.
+`estimate_pose` runs `solvePnP` (IPPE_SQUARE) for every detected marker at once.
 
 ```python
 import numpy as np
@@ -128,6 +148,39 @@ dist_coeffs = np.zeros(5, dtype=np.float64)
 rvecs, tvecs = det.estimate_pose(res.corners, camera_matrix, dist_coeffs,
                                  marker_size=0.05)   # marker side in metres
 # rvecs, tvecs: float64 (N, 3) — rotation (Rodrigues) and translation per marker
+
+# With reprojection errors per marker
+rvecs, tvecs, reproj_errs = det.estimate_pose(
+    res.corners, camera_matrix, dist_coeffs, marker_size=0.05, return_reproj=True
+)
+# reproj_errs: float64 (N,) — RMS reprojection error in pixels per marker
+```
+
+### Fisheye distortion model
+
+Both detectors support OpenCV's fisheye distortion model:
+
+```python
+# Fisheye intrinsics with exactly 4 distortion coefficients (k1, k2, k3, k4)
+camera_matrix_fisheye = np.array([[500, 0, 320],
+                                  [0, 500, 240],
+                                  [0,   0,   1]], dtype=np.float64)
+dist_coeffs_fisheye = np.array([0.1, 0.01, -0.001, 0.0005], dtype=np.float64)
+
+rvecs, tvecs = det.estimate_pose(
+    res.corners, camera_matrix_fisheye, dist_coeffs_fisheye,
+    marker_size=0.05, fisheye=True
+)
+```
+
+### Smooth pose over time
+
+```python
+smoother = nf.PoseSmoother(process_noise=1e-4, measurement_noise=1e-2)
+
+# In your frame loop:
+rvec, tvec = det.estimate_pose(res.corners, K, D, marker_size=0.05)[0]
+rvec_smooth, tvec_smooth = smoother.update(rvec, tvec)
 ```
 
 ### Detect fractal markers
@@ -168,6 +221,47 @@ res.points_2d   # float32 (M, 2) image points  (None unless with_inner_points=Tr
 res.points_3d   # float32 (M, 3) object points (planar, z = 0)
 ```
 
+### Draw ArUco markers with pose
+
+```python
+det = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
+res = det.detect(image)
+rvecs, tvecs = det.estimate_pose(res.corners, K, D, marker_size=0.05)
+
+# Draw outlines + ids + per-marker axes
+det.draw(image, res, K, D, rvecs, tvecs, marker_size=0.05, inplace=True)
+cv2.imshow("result", image)
+```
+
+### Non-destructive drawing
+
+Pass `inplace=False` to draw on a copy (preserves the original):
+
+```python
+result_image = det.draw(image, res, K, D, rvecs, tvecs, inplace=False)
+# image remains unchanged; result_image contains the annotated version
+```
+
+### Introspect dictionaries
+
+```python
+# Grid size (including border cells)
+grid_size = nf.dict_grid_size(nf.Dict.DICT_4X4_50)  # returns 6
+
+# Number of markers in the dictionary
+num_markers = nf.dict_num_markers(nf.Dict.DICT_4X4_50)  # returns 50
+num_apriltag = nf.dict_num_markers(nf.Dict.APRILTAG_36h11)  # returns 587
+```
+
+### Benchmark
+
+Run a quick throughput benchmark (stdlib + NumPy only):
+
+```bash
+python -m nanofractal.bench --resolution 1280x720 --detector aruco --frames 200
+# Output: latency, FPS, library versions, CPU architecture
+```
+
 ### Parallel batch (offline throughput)
 
 Process many frames across a thread pool. The GIL is released, so it scales with
@@ -206,8 +300,13 @@ with `cv2.aruco.generateImageMarker` are detected directly.
 - `.params` — read/write access to the `DetectorParams` after creation.
 - `detect(image) -> DetectionResult`
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
-- `estimate_pose(corners, camera_matrix, dist_coeffs, marker_size) -> (rvecs, tvecs)`
-  — `corners` is `(N, 4, 2)` float32; outputs are `(N, 3)` float64.
+- `estimate_pose(corners, camera_matrix, dist_coeffs, marker_size, return_reproj=False, fisheye=False) -> (rvecs, tvecs) | (rvecs, tvecs, reproj_errs)`
+  — `corners` is `(N, 4, 2)` float32. When `return_reproj=True` returns `(rvecs, tvecs, reproj_errs)` 
+  where reproj_errs is float64 `(N,)` per-marker RMS error. `fisheye=True` uses OpenCV fisheye model 
+  (dist_coeffs must be exactly 4).
+- `draw(image, result, camera_matrix=None, dist_coeffs=None, rvecs=None, tvecs=None, marker_size=None, axis_length=None, inplace=True) -> image`
+  — draw outlines + ids; with poses, also draw frame axes per marker. `inplace=True` (default) modifies and returns 
+  the input; `inplace=False` returns a copy (accepts read-only input).
 
 ### `FractalDetector(config, marker_size=-1.0, params=None)`
 - `config: str` — one of `FRACTAL_2L_6`, `FRACTAL_3L_6`, `FRACTAL_4L_6`,
@@ -218,12 +317,13 @@ with `cv2.aruco.generateImageMarker` are detected directly.
 - `.params` — read/write access to the `DetectorParams` after creation.
 - `detect(image, with_inner_points=False) -> DetectionResult`
 - `detect_batch(images, num_threads=0) -> list[DetectionResult]`
-- `estimate_pose(result, camera_matrix, dist_coeffs) -> (rvec, tvec, reproj_err) | None`
+- `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False) -> (rvec, tvec, reproj_err) | None`
   — single-marker pose; uses inner+outer points when ≥ 4, else the 4 outer
-  corners; `rvec`/`tvec` are float64 `(3,)`, `reproj_err` is RMS pixels.
-- `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None) -> image`
-  — draw outlines + ids (and frame axes when a pose is given) in place; `image`
-  must be a writable BGR `uint8` array.
+  corners; `rvec`/`tvec` are float64 `(3,)`, `reproj_err` is RMS pixels. `fisheye=True` 
+  uses OpenCV fisheye model (dist_coeffs must be exactly 4).
+- `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None, inplace=True) -> image`
+  — draw outlines + ids (and frame axes when a pose is given). `inplace=True` (default) modifies 
+  and returns the input; `inplace=False` returns a copy.
 
 ### `DetectorParams`
 
@@ -248,12 +348,49 @@ original hard-coded behaviour so existing code needs no changes.
 | `points_2d` | float32 `(M, 2)` or `None` | inner+outer image points (fractal, `with_inner_points=True`) |
 | `points_3d` | float32 `(M, 3)` or `None` | matching object points |
 
+**Ergonomics:**
+- `len(result)` — number of markers.
+- `bool(result)` — `True` if any markers detected.
+- `for mid, corners in result:` — iterate over `(marker_id, corners_array)` pairs.
+- `repr(result)` — concise summary including marker count and ids.
+
 Empty results are returned as correctly-shaped empty arrays (`(0,)`, `(0, 4, 2)`),
 never `None`.
+
+### Module-level functions
+
+| Function | Returns | Purpose |
+|----------|---------|---------|
+| `generate_aruco(marker_id, size_px=200, dictionary=Dict.DICT_4X4_50, border_bits=1)` | `uint8 (size_px, size_px)` | Generate an ArUco marker image. |
+| `generate_fractal(config, size_px=400)` | `uint8 (size_px, size_px)` | Generate the external level of a fractal marker. |
+| `dict_grid_size(d: Dict)` | `int` | Full grid size (including border) for a dictionary. |
+| `dict_num_markers(d: Dict)` | `int` | Number of markers in a dictionary. |
+
+**Note on `generate_fractal`:** Returns only the outermost marker level, which is 
+detectable by `FractalDetector`. It is **not** a full multi-level nested composite.
+
+### `PoseSmoother`
+
+Temporal smoothing of 6-DOF pose using Kalman filtering or exponential moving average.
+
+```python
+smoother = nf.PoseSmoother(process_noise=1e-4, measurement_noise=1e-2, mode="kalman")
+
+# Per frame:
+rvec, tvec = smoother.update(rvec_measured, tvec_measured)
+
+# Reset state (e.g. on marker loss):
+smoother.reset()
+```
+
+- `mode="kalman"` — Kalman filter (default).
+- `mode="ema"` — Exponential moving average.
+- Rvec is smoothed component-wise (suitable for small inter-frame rotation changes).
 
 ### Errors
 - Wrong dtype / non-contiguous input → `TypeError`.
 - Unsupported shape, empty frame, invalid dictionary or fractal config → `ValueError`.
+- Invalid camera intrinsics or distortion → `ValueError` with clear message.
 
 ---
 
@@ -273,19 +410,16 @@ never `None`.
 
 ## Changelog
 
-### 0.2.0
-- **`detection_scale`** — opt-in downscale of the threshold/contour/decode stage
-  for both detectors (~4× faster at 1080p; corners refined at full resolution).
-- **Lower-overhead decode** — ArUco dictionary tables are cached per detector
-  instead of rebuilt every frame; marker-id matching and rotation now run on
-  stack buffers with no per-candidate heap allocations (both detectors).
-- **Pinned SIMD** — CI wheels build OpenCV with an explicit `SSE4_2` baseline and
-  `AVX/AVX2/AVX512` runtime dispatch.
+See [CHANGELOG.md](CHANGELOG.md) for the full version history.
 
-### 0.1.x
-- Initial release: ArUco Nano v6 (all standard OpenCV dictionaries plus
-  `ARUCO_MIP_36h12` / AprilTag `36h11`), Fractal markers, pose, parallel batch,
-  and `DetectorParams` tuning.
+**Latest features:**
+- Marker generation (`generate_aruco`, `generate_fractal`).
+- `ArucoDetector.draw()` with pose visualization.
+- Per-marker reprojection errors and fisheye model support.
+- `PoseSmoother` for temporal pose smoothing.
+- Dictionary introspection (`dict_grid_size`, `dict_num_markers`).
+- Benchmark CLI.
+- aarch64 wheels.
 
 ---
 

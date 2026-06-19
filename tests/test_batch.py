@@ -1,6 +1,7 @@
 import threading
 
 import numpy as np
+
 import nanofractal as nf
 import nanofractal._nanofractal as _nf
 
@@ -10,7 +11,7 @@ def _render_aruco(marker_id=0, cell=40, margin=60):
     up = np.kron(grid, np.ones((cell, cell), dtype=np.uint8))
     h, w = up.shape
     canvas = np.full((h + 2 * margin, w + 2 * margin), 255, dtype=np.uint8)
-    canvas[margin:margin + h, margin:margin + w] = up
+    canvas[margin : margin + h, margin : margin + w] = up
     return np.ascontiguousarray(canvas)
 
 
@@ -19,7 +20,7 @@ def _render_fractal(cell=40, margin=80):
     up = np.kron(grid, np.ones((cell, cell), dtype=np.uint8))
     h, w = up.shape
     canvas = np.full((h + 2 * margin, w + 2 * margin), 255, dtype=np.uint8)
-    canvas[margin:margin + h, margin:margin + w] = up
+    canvas[margin : margin + h, margin : margin + w] = up
     return np.ascontiguousarray(canvas)
 
 

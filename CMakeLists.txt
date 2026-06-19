@@ -39,15 +39,28 @@ target_compile_options(_nanofractal PRIVATE
 # of inner pixel loops without breaking pre-Skylake CPUs in the wild.
 # ffast-math: allows fp-reassociation and removes errno overhead; safe for
 # this library (no signalling NaNs produced, no errno-dependent callers).
+#
+# aarch64 / arm64: NEON is mandatory in the ARMv8-A base ISA, so GCC/Clang
+# already enable it by default.  We add -ftree-vectorize to encourage the
+# auto-vectorizer and skip -march=native / NF_MARCH entirely (the x86 ISA
+# string is invalid on ARM and would cause a hard build failure).
 # ---------------------------------------------------------------------------
 option(NF_NATIVE "Enable -march=native -ffast-math (local dev only; not for distributed wheels)" OFF)
 set(NF_MARCH "" CACHE STRING "ISA baseline passed to -march= (e.g. x86-64-v3). Used in CI wheels.")
 
 if(NOT MSVC)
-  if(NF_NATIVE)
-    target_compile_options(_nanofractal PRIVATE -march=native -ffast-math)
-  elseif(NF_MARCH)
-    target_compile_options(_nanofractal PRIVATE -march=${NF_MARCH} -ffast-math)
+  if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|armv8")
+    # ARM / aarch64 path: rely on the compiler's default ARMv8-A target
+    # (NEON always available).  Do NOT apply NF_MARCH — an x86 ISA string
+    # would break the build.  -ffast-math is also safe here.
+    target_compile_options(_nanofractal PRIVATE -O3 -ftree-vectorize -ffast-math)
+  else()
+    # x86 / x86_64 path: honour NF_NATIVE or NF_MARCH as before.
+    if(NF_NATIVE)
+      target_compile_options(_nanofractal PRIVATE -march=native -ffast-math)
+    elseif(NF_MARCH)
+      target_compile_options(_nanofractal PRIVATE -march=${NF_MARCH} -ffast-math)
+    endif()
   endif()
 endif()
 

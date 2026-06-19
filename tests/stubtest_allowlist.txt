@@ -1,0 +1,34 @@
+# Allowlist for `mypy.stubtest nanofractal`.
+#
+# All entries below are nanobind (nb_type / nb_func) intrinsic noise:
+#
+# - nb_type classes: nanobind uses its own `nb_type` metaclass and registers
+#   types as "disjoint bases" (PEP 800).  stubtest sees the metaclass mismatch
+#   and the @disjoint_base absence, but these are not real API inconsistencies.
+#   Affected: DetectorParams, ArucoDetector, FractalDetector (both in the
+#   public namespace and in _nanofractal).
+#
+# - nb_func callables: nanobind functions appear at runtime with the Python
+#   signature `(*args, **kwargs)` because their actual signature is encoded in
+#   the C++ descriptor, not in a standard `__signature__` attribute that mypy
+#   can inspect.  stubtest therefore reports "is not a function" for every
+#   nanobind free function and flags the missing *args parameter.
+#   Affected: all module-level helpers in _nanofractal (_opencv_version,
+#   _aruco_marker_image8, _dict_grid_size, _dict_num_markers,
+#   _fractal_external_image8, _fractal_external_id) and the re-exported
+#   _opencv_version in the top-level nanofractal namespace.
+#
+# None of these entries hide real API drift — they are structural limitations
+# of how nanobind exposes types and functions to Python's introspection layer.
+
+nanofractal\.DetectorParams
+nanofractal\._nanofractal\.ArucoDetector
+nanofractal\._nanofractal\.DetectorParams
+nanofractal\._nanofractal\.FractalDetector
+nanofractal\._nanofractal\._aruco_marker_image8
+nanofractal\._nanofractal\._dict_grid_size
+nanofractal\._nanofractal\._dict_num_markers
+nanofractal\._nanofractal\._fractal_external_id
+nanofractal\._nanofractal\._fractal_external_image8
+nanofractal\._nanofractal\._opencv_version
+nanofractal\._opencv_version

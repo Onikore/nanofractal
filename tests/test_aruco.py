@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 import nanofractal as nf
 
 
@@ -39,8 +40,7 @@ def test_detect_empty_frame_raises():
         det.detect(np.zeros((0, 640), dtype=np.uint8))
 
 
-@pytest.mark.parametrize("dictionary",
-                         [nf.Dict.ARUCO_MIP_36h12, nf.Dict.APRILTAG_36h11])
+@pytest.mark.parametrize("dictionary", [nf.Dict.ARUCO_MIP_36h12, nf.Dict.APRILTAG_36h11])
 @pytest.mark.parametrize("marker_id", [0, 1, 7, 42])
 def test_detects_rendered_marker(render_aruco, marker_id, dictionary):
     img = render_aruco(marker_id, dictionary=int(dictionary))
@@ -61,8 +61,7 @@ def test_estimate_pose_frontal_marker(render_aruco):
     res = det.detect(img)
     assert 0 in res.ids.tolist()
 
-    cam = np.array([[600.0, 0, w / 2], [0, 600.0, h / 2], [0, 0, 1]],
-                   dtype=np.float64)
+    cam = np.array([[600.0, 0, w / 2], [0, 600.0, h / 2], [0, 0, 1]], dtype=np.float64)
     dist = np.zeros((5,), dtype=np.float64)
     rvecs, tvecs = det.estimate_pose(res.corners, cam, dist, marker_size=0.05)
 
@@ -72,9 +71,9 @@ def test_estimate_pose_frontal_marker(render_aruco):
     tz = tvecs[i, 2]
     # A centered, frontal marker with the principal point at the image centre
     # projects to the image centre, so its translation is ~on the optical axis.
-    assert tz > 0                          # in front of the camera
-    assert abs(tvecs[i, 0]) < 0.1 * tz     # centered horizontally
-    assert abs(tvecs[i, 1]) < 0.1 * tz     # centered vertically
+    assert tz > 0  # in front of the camera
+    assert abs(tvecs[i, 0]) < 0.1 * tz  # centered horizontally
+    assert abs(tvecs[i, 1]) < 0.1 * tz  # centered vertically
     assert np.isfinite(rvecs[i]).all()
 
 

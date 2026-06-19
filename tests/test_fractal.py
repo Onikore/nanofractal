@@ -1,5 +1,6 @@
 import numpy as np
 import pytest
+
 import nanofractal as nf
 import nanofractal._nanofractal as _nf
 
@@ -13,8 +14,9 @@ def render_fractal_external():
         up = np.kron(grid, np.ones((cell, cell), dtype=np.uint8))
         h, w = up.shape
         canvas = np.full((h + 2 * margin, w + 2 * margin), 255, dtype=np.uint8)
-        canvas[margin:margin + h, margin:margin + w] = up
+        canvas[margin : margin + h, margin : margin + w] = up
         return np.ascontiguousarray(canvas)
+
     return _render
 
 
@@ -72,10 +74,9 @@ def test_detect_with_inner_points_nonempty():
     up = np.kron(grid, np.ones((40, 40), dtype=np.uint8))
     h, w = up.shape
     base = np.full((h + 160, w + 160), 255, dtype=np.uint8)
-    base[80:80 + h, 80:80 + w] = up
+    base[80 : 80 + h, 80 : 80 + w] = up
     rng = np.random.default_rng(0)
-    img = np.clip(base.astype(np.float32) + rng.normal(0, 6, base.shape),
-                  0, 255).astype(np.uint8)
+    img = np.clip(base.astype(np.float32) + rng.normal(0, 6, base.shape), 0, 255).astype(np.uint8)
     img = np.ascontiguousarray(img)
 
     det = nf.FractalDetector(CONFIG, marker_size=0.85)
@@ -104,10 +105,11 @@ def _noisy_fractal(sigma=6.0, seed=0):
     up = np.kron(grid, np.ones((40, 40), dtype=np.uint8))
     h, w = up.shape
     base = np.full((h + 160, w + 160), 255, dtype=np.uint8)
-    base[80:80 + h, 80:80 + w] = up
+    base[80 : 80 + h, 80 : 80 + w] = up
     rng = np.random.default_rng(seed)
-    img = np.clip(base.astype(np.float32) + rng.normal(0, sigma, base.shape),
-                  0, 255).astype(np.uint8)
+    img = np.clip(base.astype(np.float32) + rng.normal(0, sigma, base.shape), 0, 255).astype(
+        np.uint8
+    )
     return np.ascontiguousarray(img)
 
 

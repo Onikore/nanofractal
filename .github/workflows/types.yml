@@ -1,0 +1,27 @@
+name: types
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  stubtest:
+    name: stub freshness (stubtest)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install OpenCV dev headers
+        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
+      - name: Build and install package
+        run: pip install -e ".[test]"
+      - name: Install mypy
+        run: pip install mypy
+      - name: Check stub freshness (stubtest)
+        run: |
+          python -m mypy.stubtest nanofractal \
+            --allowlist tests/stubtest_allowlist.txt

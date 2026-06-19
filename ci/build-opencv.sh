@@ -22,17 +22,24 @@ curl -L -o opencv.tar.gz \
   "https://github.com/opencv/opencv/archive/refs/tags/${OPENCV_VERSION}.tar.gz"
 tar xzf opencv.tar.gz
 
-# SIMD: pin the baseline + runtime dispatch explicitly so the vectorised kernels
-# (adaptiveThreshold, resize, cornerSubPix) are always compiled and CPU-selected
-# at runtime, independent of OpenCV's per-version defaults. SSE4_2 is a safe
-# baseline for the x86-64-v3 wheel floor; AVX2/AVX512 are dispatched on top.
+# SIMD flags differ by architecture.
+# x86_64: pin SSE4_2 baseline (matches the x86-64-v3 wheel floor) with AVX/AVX2/
+#         AVX512 runtime dispatch so vectorised kernels are CPU-selected at runtime.
+# aarch64: NEON is mandatory in ARMv8-A; use it as the baseline and omit the x86
+#          dispatch list entirely (passing SSE4_2 on ARM would break the build).
+arch="$(uname -m)"
+if [ "$arch" = "aarch64" ] || [ "$arch" = "arm64" ]; then
+  CPU_FLAGS="-DCPU_BASELINE=NEON -DCPU_DISPATCH="
+else
+  CPU_FLAGS="-DCPU_BASELINE=SSE4_2 -DCPU_DISPATCH=AVX,AVX2,FP16,AVX512_SKX"
+fi
+
 cmake -S "opencv-${OPENCV_VERSION}" -B ocv-build \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_INSTALL_PREFIX="$PREFIX" \
   -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
   -DBUILD_SHARED_LIBS=OFF \
-  -DCPU_BASELINE=SSE4_2 \
-  -DCPU_DISPATCH=AVX,AVX2,FP16,AVX512_SKX \
+  ${CPU_FLAGS} \
   -DBUILD_LIST=core,imgproc,calib3d,features2d \
   -DBUILD_opencv_apps=OFF -DBUILD_TESTS=OFF -DBUILD_PERF_TESTS=OFF \
   -DBUILD_EXAMPLES=OFF -DBUILD_DOCS=OFF \
