@@ -33,9 +33,17 @@ jobs:
             -e .
 
       - name: Run tests under sanitizers
+        # Preload libstdc++ alongside libasan: when ASan is LD_PRELOAD-ed into a
+        # non-ASan Python that dlopens the extension, its __cxa_throw interceptor
+        # otherwise fails to resolve and aborts on the first C++ exception — and
+        # nanofractal throws constantly for input validation. detect_leaks=0:
+        # LeakSanitizer is noise on a dlopened extension linked against a
+        # non-instrumented system OpenCV; AddressSanitizer (overflow / UAF — the
+        # part that matters for the zero-copy buffer code) stays on. -s disables
+        # pytest capture so any real sanitizer report reaches the log.
         env:
-          ASAN_OPTIONS: "detect_leaks=1:halt_on_error=0:abort_on_error=0"
+          ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1:abort_on_error=1"
           PYTHONMALLOC: "malloc"
         run: |
-          LD_PRELOAD="$(gcc -print-file-name=libasan.so)" \
-            python -m pytest tests -q --ignore tests/test_benchmarks.py
+          LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libstdc++.so)" \
+            python -m pytest tests -q -s --ignore tests/test_benchmarks.py
