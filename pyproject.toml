@@ -81,15 +81,18 @@ archs = ["AMD64"]
 # This overrides the global before-all ("bash ci/build-opencv.sh") for Windows so
 # the Linux static-build script is never attempted on the Windows runner.
 before-all = "pwsh -NoProfile -File ci\\build-opencv-windows.ps1"
-# CMAKE_PREFIX_PATH points CMake's find_package(OpenCV) at the prebuilt's
-# build/ dir (which holds OpenCVConfig.cmake — verified). FORWARD slashes: the
-# previous backslash OpenCV_DIR/PATH were mangled by cibuildwheel's env parser
-# on Windows and never reached CMake. This mirrors the working Linux config,
-# which also passes the OpenCV location via CMAKE_PREFIX_PATH.
-# ponytail: C:/nf-opencv must match $DEST in build-opencv-windows.ps1; x64/vc16
-#           is the MSVC-2019 subdir of the 4.10.0 prebuilt. Ceiling: re-check
-#           both on an OpenCV version bump (vc16 may become vc17).
-environment = { CMAKE_PREFIX_PATH = "C:/nf-opencv/opencv/build" }
+# CMAKE_PREFIX_PATH points find_package(OpenCV) directly at the vc16 (MSVC-2019)
+# config dir, NOT the top-level build/ dir. The top-level OpenCVConfig.cmake
+# auto-selects binaries by MSVC version and rejects toolchains newer than it
+# knows ("no binaries compatible") — and the windows runner now ships VS2026.
+# The vc16/lib config defines the targets directly, bypassing that dispatch.
+# The runner is pinned to windows-2022 (v143) in release.yml, which is ABI-
+# compatible with these v142 binaries (MSVC v140–v143 binary-compat guarantee).
+# FORWARD slashes: backslashes get mangled by cibuildwheel's Windows env parser.
+# ponytail: C:/nf-opencv matches $DEST in build-opencv-windows.ps1. Ceiling: on
+#           an OpenCV bump vc16 may become vc17; if the prebuilt drops a runner-
+#           compatible vc, switch to a vcpkg source build of opencv4.
+environment = { CMAKE_PREFIX_PATH = "C:/nf-opencv/opencv/build/x64/vc16/lib" }
 # delvewheel must bundle opencv_world4100.dll; give it the DLL dir explicitly
 # (forward slashes) instead of routing a backslash PATH through the env parser.
 repair-wheel-command = "delvewheel repair --add-path C:/nf-opencv/opencv/build/x64/vc16/bin -w {dest_dir} {wheel}"

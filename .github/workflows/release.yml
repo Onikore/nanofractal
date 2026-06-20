@@ -40,7 +40,10 @@ jobs:
 
   wheels_windows:
     name: wheels windows AMD64
-    runs-on: windows-latest
+    # Pinned: the prebuilt OpenCV 4.10.0 ships vc16 (MSVC v142) binaries.
+    # windows-2022 is VS2022 (v143), ABI-compatible with v142. windows-latest
+    # has moved to VS2026 (v145), which OpenCV's pack rejects as incompatible.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
       - name: Build wheels
