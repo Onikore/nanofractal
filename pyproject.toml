@@ -4,12 +4,36 @@ build-backend = "scikit_build_core.build"
 
 [project]
 name = "nanofractal"
-version = "0.4.0"
+version = "0.5.0"
 description = "High-performance fiducial marker detection (ArUco Nano v6 + Fractal)"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "Apache-2.0" }
+license = { file = "LICENSE" }
+authors = [{ name = "Dmitry", email = "demon5326@gmail.com" }]
+keywords = ["aruco", "fiducial", "marker", "fractal", "pose", "opencv", "detection"]
 dependencies = ["numpy>=1.21"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: Apache Software License",
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: C++",
+  "Topic :: Scientific/Engineering :: Image Recognition",
+  "Topic :: Software Development :: Libraries",
+]
+
+[project.urls]
+Homepage = "https://github.com/Onikore/nanofractal"
+Source = "https://github.com/Onikore/nanofractal"
+Changelog = "https://github.com/Onikore/nanofractal/blob/main/CHANGELOG.md"
+Issues = "https://github.com/Onikore/nanofractal/issues"
 
 [project.optional-dependencies]
 test = ["pytest>=7", "pytest-benchmark>=4", "pytest-cov>=4"]
@@ -49,6 +73,22 @@ archs = ["x86_64", "aarch64"]
 # NF_MARCH: x86-64-v3 = AVX2+FMA+BMI (Haswell 2013+); safe floor for 2024 machines.
 # CMakeLists.txt ignores NF_MARCH on aarch64 (see arch-tuning block).
 environment = { CMAKE_PREFIX_PATH = "/project/.opencv-cache", NF_MARCH = "x86-64-v3" }
+
+[tool.cibuildwheel.windows]
+# ponytail: AMD64 only — win32 is already excluded in [tool.cibuildwheel].skip.
+archs = ["AMD64"]
+# Provision the OpenCV 4.10.0 Windows prebuilt (7-zip SFX from GitHub releases).
+# This overrides the global before-all ("bash ci/build-opencv.sh") for Windows so
+# the Linux static-build script is never attempted on the Windows runner.
+before-all = "pwsh -NoProfile -File ci\\build-opencv-windows.ps1"
+# OpenCV_DIR: directory containing OpenCVConfig.cmake (matches $DEST in the ps1).
+# PATH: prepend the DLL directory so delvewheel can locate opencv_world4100.dll
+#       during the wheel-repair step and bundle it into the wheel.
+# ponytail: C:\nf-opencv matches the extraction dest in build-opencv-windows.ps1;
+#           update both locations if the path changes.
+# ponytail: x64\vc16 is the MSVC 2019 subdirectory in the 4.10.0 prebuilt.
+#           Ceiling: re-check this subdir on OpenCV version bump (may become vc17).
+environment = { OpenCV_DIR = "C:\\nf-opencv\\opencv\\build", PATH = "C:\\nf-opencv\\opencv\\build\\x64\\vc16\\bin;$PATH" }
 
 [tool.ruff]
 line-length = 100

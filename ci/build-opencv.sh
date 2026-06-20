@@ -23,6 +23,15 @@ yum install -y zlib-devel || dnf install -y zlib-devel || true
 cd /tmp
 curl -L -o opencv.tar.gz \
   "https://github.com/opencv/opencv/archive/refs/tags/${OPENCV_VERSION}.tar.gz"
+# Integrity check against a supply-chain tarball swap.
+# ponytail: GitHub auto-generated archive hashes are stable in practice but NOT
+# contractually guaranteed (a recompression would change them). Ceiling: if this
+# check fails after bumping OPENCV_VERSION (or a rare GitHub recompress), update
+# the pinned hash. Upgrade path: switch to a release asset with a published digest.
+OPENCV_SHA256_4_10_0="b2171af5be6b26f7a06b1229948bbb2bdaa74fcf5cd097e0af6378fce50a6eb9"
+if [ "$OPENCV_VERSION" = "4.10.0" ]; then
+  echo "${OPENCV_SHA256_4_10_0}  opencv.tar.gz" | sha256sum --check --strict
+fi
 tar xzf opencv.tar.gz
 
 # SIMD flags differ by architecture.

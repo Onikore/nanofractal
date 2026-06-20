@@ -5,6 +5,22 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-20
+
+### Added
+- **Windows wheels** (`win_amd64`, CPython 3.9–3.13) — built with the prebuilt
+  OpenCV Windows release and `delvewheel`-bundled, alongside the existing Linux
+  x86_64/aarch64 wheels.
+
+### Changed
+- **Releases publish via PyPI OIDC Trusted Publishing** — no stored API token.
+- Added a `LICENSE` file (Apache-2.0) and full PyPI metadata (classifiers,
+  authors, project URLs).
+- Pinned a SHA-256 checksum on the downloaded OpenCV source tarball (CI build).
+- README performance section reworked to point at the real benchmarks
+  (`python -m nanofractal.bench`, `benchmarks/`) instead of stale hard-coded
+  figures. More tests (`detection_scale`, ROI boundaries, bench smoke).
+
 ## [0.4.0] - 2026-06-19
 
 ### Added
@@ -95,7 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GIL released during detection for multi-core batch scaling.
 - Portable `manylinux` wheels with a minimal static OpenCV linked in.
 
-[0.4.0]: https://github.com/Onikore/nanofractal/compare/v0.3.0...v0.4.0
+[0.5.0]: https://github.com/Onikore/nanofractal/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Onikore/nanofractal/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Onikore/nanofractal/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/Onikore/nanofractal/compare/v0.1.1...v0.2.0

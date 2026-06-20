@@ -205,3 +205,41 @@ def test_fractal_detect_batch_roi_finds_marker():
     assert len(results) == 2
     for res in results:
         assert ext_id in res.ids.tolist()
+
+
+# ── ROI boundary cases ───────────────────────────────────────────────────────
+
+
+def test_aruco_roi_full_image_matches_no_roi():
+    """roi covering the whole image gives the same ids as no roi at all."""
+    img, _, _ = _render_aruco_in_canvas(marker_id=0)
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    H, W = img.shape
+    res_full_roi = det.detect(img, roi=(0, 0, W, H))
+    res_no_roi = det.detect(img)
+    assert sorted(res_full_roi.ids.tolist()) == sorted(res_no_roi.ids.tolist())
+
+
+def test_aruco_roi_excludes_marker_returns_empty():
+    """roi that does not cover the marker should return no detections."""
+    img, ox, oy = _render_aruco_in_canvas(marker_id=0, margin=80)
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    H, W = img.shape
+    # Marker sits at top-left (starting at ox, oy); roi covers bottom-right quadrant only.
+    roi = (W // 2, H // 2, W - W // 2, H - H // 2)
+    res = det.detect(img, roi=roi)
+    assert 0 not in res.ids.tolist()
+
+
+def test_aruco_roi_flush_right_bottom_accepted():
+    """roi with x+w == W and y+h == H (flush edges) must not raise an off-by-one error."""
+    img, _, _ = _render_aruco_in_canvas(marker_id=0)
+    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
+    H, W = img.shape
+    # Inset by 1 on top/left so the roi is *not* the full frame, but still flush right/bottom.
+    roi = (1, 1, W - 1, H - 1)
+    assert roi[0] + roi[2] == W  # x + w == W
+    assert roi[1] + roi[3] == H  # y + h == H
+    # Must not raise; marker is well inside so we can also assert detection.
+    res = det.detect(img, roi=roi)
+    assert 0 in res.ids.tolist()

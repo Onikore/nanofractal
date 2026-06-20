@@ -13,13 +13,19 @@ compact, header-only C++ detectors with [nanobind](https://github.com/wjakob/nan
 It is built for speed: **zero-copy** NumPy ↔ `cv::Mat`, the **GIL is released**
 during detection, and a **parallel batch** API scales across cores.
 
-```text
-single-frame detect():   ~0.43 ms @ 640×480   ~1.0 ms @ 1280×720   ~3.1 ms @ 1920×1080
-detection_scale=0.5:     ~4× faster on the threshold/contour stage (corners refined at full res)
-batch detect_batch():    ~3.2× throughput on 4 threads
+Performance depends heavily on hardware, resolution, and marker density. Run the
+included benchmarks on your own machine to get numbers that actually apply to
+your setup:
+
+```bash
+python -m nanofractal.bench                # single-frame latency, aruco + fractal
+python benchmarks/compare_opencv.py        # nanofractal vs cv2.aruco head-to-head
 ```
 
-> Measured on a desktop CPU with `max_attempts=1`; your numbers will vary.
+Key levers: **`detection_scale`** downsamples the threshold/contour stage
+(corners are still refined at full resolution), giving a large speedup on
+high-res frames. **`detect_batch`** parallelises across cores via a C++
+thread pool, scaling throughput roughly with available threads.
 
 ---
 
