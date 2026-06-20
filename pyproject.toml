@@ -81,14 +81,18 @@ archs = ["AMD64"]
 # This overrides the global before-all ("bash ci/build-opencv.sh") for Windows so
 # the Linux static-build script is never attempted on the Windows runner.
 before-all = "pwsh -NoProfile -File ci\\build-opencv-windows.ps1"
-# OpenCV_DIR: directory containing OpenCVConfig.cmake (matches $DEST in the ps1).
-# PATH: prepend the DLL directory so delvewheel can locate opencv_world4100.dll
-#       during the wheel-repair step and bundle it into the wheel.
-# ponytail: C:\nf-opencv matches the extraction dest in build-opencv-windows.ps1;
-#           update both locations if the path changes.
-# ponytail: x64\vc16 is the MSVC 2019 subdirectory in the 4.10.0 prebuilt.
-#           Ceiling: re-check this subdir on OpenCV version bump (may become vc17).
-environment = { OpenCV_DIR = "C:\\nf-opencv\\opencv\\build", PATH = "C:\\nf-opencv\\opencv\\build\\x64\\vc16\\bin;$PATH" }
+# CMAKE_PREFIX_PATH points CMake's find_package(OpenCV) at the prebuilt's
+# build/ dir (which holds OpenCVConfig.cmake — verified). FORWARD slashes: the
+# previous backslash OpenCV_DIR/PATH were mangled by cibuildwheel's env parser
+# on Windows and never reached CMake. This mirrors the working Linux config,
+# which also passes the OpenCV location via CMAKE_PREFIX_PATH.
+# ponytail: C:/nf-opencv must match $DEST in build-opencv-windows.ps1; x64/vc16
+#           is the MSVC-2019 subdir of the 4.10.0 prebuilt. Ceiling: re-check
+#           both on an OpenCV version bump (vc16 may become vc17).
+environment = { CMAKE_PREFIX_PATH = "C:/nf-opencv/opencv/build" }
+# delvewheel must bundle opencv_world4100.dll; give it the DLL dir explicitly
+# (forward slashes) instead of routing a backslash PATH through the env parser.
+repair-wheel-command = "delvewheel repair --add-path C:/nf-opencv/opencv/build/x64/vc16/bin -w {dest_dir} {wheel}"
 
 [tool.ruff]
 line-length = 100
