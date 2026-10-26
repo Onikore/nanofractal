@@ -54,6 +54,9 @@ Levers:
 - **`params.detection_scale`** — runs the threshold/contour stage on a
   downscaled frame (corners are still refined at full resolution); `0.5` is
   roughly 3–4× faster at 4K.
+- **`FractalTracker`** — for video: searches near the previous frame's
+  markers (whole frame when they are lost), with identical accuracy; ~2.2×
+  faster at 4K and 1.2–1.8× at 1080p on a moving-marker sequence.
 - **`detect_batch`** — parallelises across frames for offline throughput.
 
 ---
@@ -149,6 +152,14 @@ det = nf.FractalDetector("FRACTAL_5L_6", params=p)
 det.params.adaptive_c = 5.0  # changes apply to the next detect()
 ```
 
+### Video
+
+```python
+tracker = nf.FractalTracker(det)          # margin=0.25, pad=16
+for frame in frames:
+    res = tracker.detect(frame)           # same results as det.detect(frame)
+```
+
 ### More
 
 - `detect(image, roi=(x, y, w, h))` — detect in a zero-copy sub-rectangle;
@@ -178,12 +189,19 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
   its own pixel labels and a contour is kept by the band holding its start,
   the ownership rule also used by OpenCV's data-race-free TRUCO tracer; the
   test-suite checks the result against `findContours` on millions of
-  contours, including bands one row high.
+  contours, including bands one row high. It is 2–3× faster than OpenCV 5.0's
+  own parallel `findContours` at every thread count (1080p, 12 threads:
+  0.31 vs 0.72 ms).
 - **Polygon fit + decoding** in parallel per contour, with exact replicas of
   OpenCV 4's and OpenCV 5's `approxPolyDP` (they differ) and no per-frame heap
   traffic.
 - **Inner points.** FAST runs only around the marker; keypoint filtering and
   matching use grids instead of O(n²) scans.
+- **Tracking** (`FractalTracker`): region-of-interest search around the
+  previous detection, after Romero-Ramirez et al., *Speeded up detection of
+  squared fiducial markers* (2018). Their other lever — shrinking the image to
+  the previous marker size — was tested and rejected: it raised the corner
+  error from 0.39 to 1.3 px.
 - **Zero-copy input, GIL released**, a detector pool for `detect_batch`.
 
 The one intentional behaviour difference from the reference detector: with

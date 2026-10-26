@@ -380,12 +380,14 @@ def refine_corners(
 
 from .generate import generate_fractal  # noqa: E402
 from .smoother import PoseSmoother  # noqa: E402
+from .tracker import FractalTracker  # noqa: E402
 
 __all__ = [
     "__version__",
     "DetectionResult",
     "DetectorParams",
     "FractalDetector",
+    "FractalTracker",
     "generate_fractal",
     "PoseSmoother",
     "refine_corners",

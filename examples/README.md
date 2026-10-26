@@ -47,7 +47,8 @@ python examples/batch_processing.py [image_folder]
 Real-time marker detection from a webcam stream.
 
 - Captures video from the default webcam.
-- Detects and visualizes fractal markers in real-time.
+- Detects and visualizes fractal markers in real-time with `FractalTracker`
+  (searches near the previous frame's markers).
 - Press 'q' to quit, 's' to save a frame.
 
 **Requires opencv-python:**

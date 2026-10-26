@@ -40,6 +40,8 @@ def main():
 
     print("Creating detector...")
     detector = nf.FractalDetector("FRACTAL_5L_6")
+    # searches near the previous frame's markers, whole frame when lost
+    tracker = nf.FractalTracker(detector)
 
     print("Starting video stream (press 'q' to quit, 's' to save)...")
     frame_count = 0
@@ -54,7 +56,7 @@ def main():
         frame_count += 1
 
         # Detect markers
-        result = detector.detect(frame)
+        result = tracker.detect(frame)
 
         # Draw detections
         annotated = detector.draw(frame, result, inplace=False)

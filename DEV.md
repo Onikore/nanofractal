@@ -1,33 +1,47 @@
 # Development notes
 
-## Environment
-
-Use the project virtualenv at `.venv` for all builds and tests:
-
-```bash
-.venv/bin/python -m pip install -e ".[test]"
-```
-
-### IMPORTANT: strip PYTHONPATH when running Python/pytest
-
-This machine sources a ROS (Jazzy) + Livox workspace in the shell, which sets a
-`PYTHONPATH` pointing at `/opt/ros/jazzy/...` and a `ws_livox` workspace. Those
-directories contain pytest plugins (ament/launch_testing_ros) that get
-autoloaded and crash during collection (e.g. `ModuleNotFoundError: No module
-named 'yaml'`). The fix is to unset `PYTHONPATH` for our commands:
-
-```bash
-env -u PYTHONPATH .venv/bin/python -m pytest tests/ -v
-env -u PYTHONPATH .venv/bin/python -m pip install -e ".[test]"
-```
-
-Always prefix Python/pytest invocations with `env -u PYTHONPATH`.
-
 ## Build
 
-The extension is built by scikit-build-core + CMake (nanobind). A normal
-editable install recompiles after C++ changes:
+The extension is built by scikit-build-core + CMake (nanobind) against
+OpenCV 4.x (`core imgproc calib3d features2d`) or 5.x
+(`core imgproc geometry features`). An editable install recompiles after C++
+changes:
 
 ```bash
-env -u PYTHONPATH .venv/bin/python -m pip install -e ".[test]"
+python -m pip install -e ".[test]"
+NF_MARCH=x86-64-v3 python -m pip install -e ".[test]"   # AVX2, like the x86_64 wheels
 ```
+
+`CMAKE_PREFIX_PATH` selects a non-system OpenCV (e.g. a static build from
+`ci/build-opencv.sh`, which is what the Linux wheels use).
+
+## Tests
+
+```bash
+python -m pytest tests -q --ignore tests/test_benchmarks.py
+```
+
+`tests/test_reference_equivalence.py` checks the optimised pipeline
+(`src/fractal_fast.hpp`) against the upstream reference detector
+(`third_party/nanofractal.h`, exposed as `_reference_detect`) and the
+band-parallel contour tracer against sequential `cv::findContours`. Any
+change to the hot path must keep those exact.
+
+## Performance work
+
+```bash
+python benchmarks/fractal_bench.py dump --out ref.npz     # before the change
+python benchmarks/fractal_bench.py run --json base.json
+# ... change, rebuild ...
+python benchmarks/fractal_bench.py compare ref.npz        # identical detections?
+python benchmarks/fractal_bench.py run --vs base.json     # speedups
+python benchmarks/robustness.py --json after.json         # quality unchanged?
+```
+
+Measure single-core numbers with `--threads 1` and a pinned core
+(`taskset -c N` on Linux); all-core numbers with `--threads 0`.
+
+## Environment note (ROS machines)
+
+If the shell sources a ROS workspace, its `PYTHONPATH` pulls in pytest
+plugins that crash collection; run Python with `env -u PYTHONPATH`.

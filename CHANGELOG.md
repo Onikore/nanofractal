@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   3.2–4.6× faster on one core and 6–19× with all cores at 1080p / 4K;
   `detect_batch` ~3.6× more frames/s.
 - `set_num_threads(n)` / `get_num_threads()` — threads per `detect()` call.
+- `FractalTracker` — video helper that searches near the previous detection
+  (after Romero-Ramirez et al. 2018) with full-frame fallback; same results,
+  ~2.2× faster at 4K.
 - `generate_fractal(..., nested=True)` renders the full nested marker
   (previously only the external level).
 - OpenCV 5 support (OpenCV 4 keeps working).

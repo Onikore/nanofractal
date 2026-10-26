@@ -86,6 +86,19 @@ class FractalDetector:
         inplace: bool = ...,
     ) -> npt.NDArray[np.uint8]: ...
 
+# ── FractalTracker ───────────────────────────────────────────────────────────
+class FractalTracker:
+    detector: FractalDetector
+    margin: float
+    pad: int
+    full_frame_detections: int
+
+    def __init__(self, detector: FractalDetector, margin: float = ..., pad: int = ...) -> None: ...
+    def reset(self) -> None: ...
+    def detect(
+        self, image: npt.NDArray[np.uint8], with_inner_points: bool = ...
+    ) -> DetectionResult: ...
+
 # ── PoseSmoother ─────────────────────────────────────────────────────────────
 class PoseSmoother:
     def __init__(
@@ -124,6 +137,7 @@ __all__ = [
     "DetectionResult",
     "DetectorParams",
     "FractalDetector",
+    "FractalTracker",
     "PoseSmoother",
     "generate_fractal",
     "refine_corners",
