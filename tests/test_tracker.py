@@ -19,8 +19,12 @@ def _video(w=1280, h=720, n=12):
     for i in range(n):
         cx, cy, s = 300 + 40 * i, 360 + 10 * np.sin(i), 350 + 15 * i
         quad = np.array(
-            [[cx - s / 2, cy - s / 2], [cx + s / 2, cy - s / 2], [cx + s / 2, cy + s / 2],
-             [cx - s / 2, cy + s / 2]]
+            [
+                [cx - s / 2, cy - s / 2],
+                [cx + s / 2, cy - s / 2],
+                [cx + s / 2, cy + s / 2],
+                [cx - s / 2, cy + s / 2],
+            ]
         )
         img = bg.copy()
         _warp_onto(img, m, quad)
