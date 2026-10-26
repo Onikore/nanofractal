@@ -1,4 +1,5 @@
 #include "detector_params.h"
+#include "fractal_fast.hpp"
 #include "nanofractal.h"
 #include "ndarray_cv.hpp"
 #include <algorithm>
@@ -49,18 +50,54 @@ static void draw_outlines_ids(cv::Mat &im, const F32Arr &corners,
 }
 
 // ---- Fractal ----
-// FractalMarkerDetector::detect is non-const (map::operator[] is non-const; the
-// with-inner-points path also mutates a lazy getKeypts() cache), so it is NOT
-// safe to call concurrently on one instance. We keep a pool of independent
-// detectors (one per worker thread); detect()/detect_full() and detect_batch's
-// thread 0 all use pool[0] -- concurrent calls on the same Python object are
-// serialized by the GIL. The fractal config is expensive to build, so it is
-// constructed once per pooled detector.
+// FastFractalDetector keeps per-frame scratch buffers, so it is NOT safe to call
+// concurrently on one instance. We keep a pool of independent detectors (one per
+// worker thread); detect()/detect_full() and detect_batch's thread 0 all use
+// pool[0] -- concurrent calls on the same Python object are serialized by the
+// GIL. The fractal config is expensive to build, so it is constructed once per
+// pooled detector. `params` is copied into a pooled detector before every call,
+// so changes made after construction take effect on the next detection.
+using nanofractal_fast::Detection;
+using nanofractal_fast::FastFractalDetector;
+
+static void fill(const std::vector<Detection> &markers, std::vector<int32_t> &ids,
+                 std::vector<float> &corners, float ox = 0.f, float oy = 0.f) {
+  size_t n = markers.size();
+  ids.resize(n);
+  corners.resize(n * 8);
+  for (size_t i = 0; i < n; i++) {
+    ids[i] = markers[i].id;
+    for (int c = 0; c < 4; c++) {
+      corners[i * 8 + c * 2 + 0] = markers[i].corners[c].x + ox;
+      corners[i * 8 + c * 2 + 1] = markers[i].corners[c].y + oy;
+    }
+  }
+}
+
+static nb::tuple full_result(std::vector<int32_t> &&ids, std::vector<float> &&corners,
+                             const std::vector<cv::Point2f> &p2d,
+                             const std::vector<cv::Point3f> &p3d, float ox, float oy) {
+  size_t n = ids.size();
+  size_t m2 = p2d.size();
+  std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
+  for (size_t i = 0; i < m2; i++) {
+    pts2[i * 2 + 0] = p2d[i].x + ox;
+    pts2[i * 2 + 1] = p2d[i].y + oy;
+    pts3[i * 3 + 0] = p3d[i].x;
+    pts3[i * 3 + 1] = p3d[i].y;
+    pts3[i * 3 + 2] = p3d[i].z;
+  }
+  return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                        corners_to_numpy(std::move(corners), n),
+                        make_owned<float>(std::move(pts2), {m2, (size_t)2}),
+                        make_owned<float>(std::move(pts3), {m2, (size_t)3}));
+}
+
 struct FractalDetectorImpl {
   std::string config;
   float marker_size;
   DetectorParams params;
-  std::vector<std::unique_ptr<nanofractal::FractalMarkerDetector>> pool;
+  std::vector<std::unique_ptr<FastFractalDetector>> pool;
 
   FractalDetectorImpl(std::string cfg, float msize, DetectorParams p = {})
       : config(std::move(cfg)), marker_size(msize), params(p) {
@@ -75,25 +112,13 @@ struct FractalDetectorImpl {
   FractalDetectorImpl(FractalDetectorImpl &&) = default;
   FractalDetectorImpl &operator=(FractalDetectorImpl &&) = default;
 
-  std::unique_ptr<nanofractal::FractalMarkerDetector> make_detector() const {
-    auto d = std::make_unique<nanofractal::FractalMarkerDetector>();
-    d->setParams(config, marker_size > 0 ? marker_size : -1.f);
-    d->params = params;
-    return d;
+  std::unique_ptr<FastFractalDetector> make_detector() const {
+    return std::make_unique<FastFractalDetector>(config, marker_size > 0 ? marker_size : -1.f);
   }
 
-  static void fill(const std::vector<nanofractal::FractalMarker> &markers,
-                   std::vector<int32_t> &ids, std::vector<float> &corners) {
-    size_t n = markers.size();
-    ids.resize(n);
-    corners.resize(n * 8);
-    for (size_t i = 0; i < n; i++) {
-      ids[i] = markers[i].id;
-      for (int c = 0; c < 4; c++) {
-        corners[i * 8 + c * 2 + 0] = markers[i][c].x;
-        corners[i * 8 + c * 2 + 1] = markers[i][c].y;
-      }
-    }
+  FastFractalDetector &detector(size_t t) {
+    pool[t]->params = params;
+    return *pool[t];
   }
 
   nb::tuple detect(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
@@ -101,22 +126,17 @@ struct FractalDetectorImpl {
     cv::Mat im = as_image(arr);
     bool has_roi = (rw > 0 && rh > 0);
     cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
-    std::vector<nanofractal::FractalMarker> markers;
+    std::vector<Detection> markers;
+    FastFractalDetector &d = detector(0);
     {
       nb::gil_scoped_release rel;
-      markers = pool[0]->detect(work);
+      d.detect(work, markers);
     }
     std::vector<int32_t> ids;
     std::vector<float> corners;
-    fill(markers, ids, corners);
-    size_t n = ids.size();
     // Offset corners to full-image coordinates when an ROI was used.
-    if (has_roi) {
-      for (size_t i = 0; i < n * 8; i += 2) {
-        corners[i + 0] += (float)rx;
-        corners[i + 1] += (float)ry;
-      }
-    }
+    fill(markers, ids, corners, has_roi ? (float)rx : 0.f, has_roi ? (float)ry : 0.f);
+    size_t n = ids.size();
     return nb::make_tuple(ids_to_numpy(std::move(ids)),
                           corners_to_numpy(std::move(corners), n));
   }
@@ -128,42 +148,23 @@ struct FractalDetectorImpl {
     cv::Mat im = as_image(arr);
     bool has_roi = (rw > 0 && rh > 0);
     cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
-    std::vector<nanofractal::FractalMarker> markers;
+    std::vector<Detection> markers;
     std::vector<cv::Point3f> p3d;
     std::vector<cv::Point2f> p2d;
+    FastFractalDetector &d = detector(0);
     {
       nb::gil_scoped_release rel;
-      markers = pool[0]->detect(work, p3d, p2d);
+      d.detect(work, markers, p3d, p2d);
     }
+    const float ox = has_roi ? (float)rx : 0.f, oy = has_roi ? (float)ry : 0.f;
     std::vector<int32_t> ids;
     std::vector<float> corners;
-    fill(markers, ids, corners);
-    size_t n = ids.size();
-    // Offset corners and 2-D points to full-image coordinates.
-    if (has_roi) {
-      for (size_t i = 0; i < n * 8; i += 2) {
-        corners[i + 0] += (float)rx;
-        corners[i + 1] += (float)ry;
-      }
-    }
-
-    size_t m2 = p2d.size();
-    std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
-    for (size_t i = 0; i < m2; i++) {
-      pts2[i * 2 + 0] = p2d[i].x + (has_roi ? (float)rx : 0.f);
-      pts2[i * 2 + 1] = p2d[i].y + (has_roi ? (float)ry : 0.f);
-      pts3[i * 3 + 0] = p3d[i].x;
-      pts3[i * 3 + 1] = p3d[i].y;
-      pts3[i * 3 + 2] = p3d[i].z;
-    }
-    return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                          corners_to_numpy(std::move(corners), n),
-                          make_owned<float>(std::move(pts2), {m2, (size_t)2}),
-                          make_owned<float>(std::move(pts3), {m2, (size_t)3}));
+    fill(markers, ids, corners, ox, oy);
+    return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy);
   }
 
-  // Parallel batch detection. The fractal detector is not thread-safe, so each
-  // worker thread t uses its own pool[t] (built once, lazily grown to T).
+  // Parallel batch detection. The detector is not thread-safe, so each worker
+  // thread t uses its own pool[t] (built once, lazily grown to T).
   std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
                                        int num_threads, int rx = -1,
                                        int ry = -1, int rw = -1, int rh = -1) {
@@ -183,6 +184,8 @@ struct FractalDetectorImpl {
       T = (int)N; // avoid building detectors we won't use
     while ((int)pool.size() < T)
       pool.push_back(make_detector());
+    for (int t = 0; t < T; t++)
+      detector(t); // sync params
 
     float ox_ = has_roi ? (float)rx : 0.f;
     float oy_ = has_roi ? (float)ry : 0.f;
@@ -192,16 +195,11 @@ struct FractalDetectorImpl {
       nb::gil_scoped_release rel;
       std::atomic<size_t> next{0};
       auto worker = [&](int t) {
+        std::vector<Detection> markers;
         size_t i;
         while ((i = next.fetch_add(1)) < N) {
-          auto markers = pool[t]->detect(mats[i]);
-          fill(markers, all_ids[i], all_corners[i]);
-          if (has_roi) {
-            for (size_t j = 0; j < all_corners[i].size(); j += 2) {
-              all_corners[i][j + 0] += ox_;
-              all_corners[i][j + 1] += oy_;
-            }
-          }
+          pool[t]->detect(mats[i], markers);
+          fill(markers, all_ids[i], all_corners[i], ox_, oy_);
         }
       };
       std::vector<std::thread> ths;
@@ -465,6 +463,37 @@ NB_MODULE(_nanofractal, m) {
     }
     return make_owned<float>(std::move(out), {N, (size_t)4, (size_t)2});
   });
+
+  // The upstream reference detector (third_party/nanofractal.h), used by the
+  // test-suite to check that the optimised pipeline returns identical output.
+  m.def(
+      "_reference_detect",
+      [](std::string config, float marker_size, DetectorParams p, RawArray arr,
+         bool inner) {
+        cv::Mat im = as_image(arr);
+        nanofractal::FractalMarkerDetector d;
+        d.setParams(config, marker_size > 0 ? marker_size : -1.f);
+        d.params = p;
+        std::vector<nanofractal::FractalMarker> markers;
+        std::vector<cv::Point3f> p3d;
+        std::vector<cv::Point2f> p2d;
+        {
+          nb::gil_scoped_release rel;
+          markers = inner ? d.detect(im, p3d, p2d) : d.detect(im);
+        }
+        std::vector<Detection> det(markers.size());
+        for (size_t i = 0; i < markers.size(); i++) {
+          det[i].id = markers[i].id;
+          for (int c = 0; c < 4; c++)
+            det[i].corners[c] = markers[i][c];
+        }
+        std::vector<int32_t> ids;
+        std::vector<float> corners;
+        fill(det, ids, corners);
+        return full_result(std::move(ids), std::move(corners), p2d, p3d, 0.f, 0.f);
+      },
+      nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
+      nb::arg("image"), nb::arg("inner"));
 
   m.def("_fractal_external_id", [](std::string config) {
     nanofractal::FractalMarkerSet s(config);
