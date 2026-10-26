@@ -24,19 +24,22 @@ import nanofractal as nf
 # ---------------------------------------------------------------------------
 # Shared detector and marker parameters
 # ---------------------------------------------------------------------------
-_DICT = nf.Dict.ARUCO_MIP_36h12
-_MARKER_ID_4K = 5
-_MARKER_ID_8K = 3
+_CONFIG = "FRACTAL_5L_6"
+_EXT_ID = 0  # external (outermost) level of FRACTAL_5L_6
+_MARKER_ID_4K = _EXT_ID
+_MARKER_ID_8K = _EXT_ID
 _MARKER_MARGIN = 80
 
 
-def _make_detector(attempts: int = 10) -> nf.ArucoDetector:
-    return nf.ArucoDetector(_DICT, max_attempts=attempts)
+def _make_detector(attempts: int = 10) -> nf.FractalDetector:
+    # ``attempts`` is kept for call-site symmetry; the fractal detector has no retries.
+    return nf.FractalDetector(_CONFIG)
 
 
 def _render_marker(marker_id: int, size_px: int = 300) -> np.ndarray:
-    """Return a square grayscale ArUco marker via nf.generate_aruco (no cv2)."""
-    return nf.generate_aruco(marker_id, size_px=size_px, dictionary=_DICT)
+    """Return a square grayscale nested fractal marker via nf.generate_fractal (no cv2)."""
+    assert marker_id == _EXT_ID
+    return nf.generate_fractal(_CONFIG, size_px=size_px)
 
 
 def _frame_gray(H: int, W: int, marker: np.ndarray, margin: int = _MARKER_MARGIN) -> np.ndarray:

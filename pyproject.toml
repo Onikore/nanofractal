@@ -5,12 +5,12 @@ build-backend = "scikit_build_core.build"
 [project]
 name = "nanofractal"
 version = "0.5.0"
-description = "High-performance fiducial marker detection (ArUco Nano v6 + Fractal)"
+description = "High-performance fractal fiducial marker detection"
 readme = "README.md"
 requires-python = ">=3.9"
 license = { file = "LICENSE" }
 authors = [{ name = "Dmitry", email = "demon5326@gmail.com" }]
-keywords = ["aruco", "fiducial", "marker", "fractal", "pose", "opencv", "detection"]
+keywords = ["fractal", "fiducial", "marker", "pose", "opencv", "detection"]
 dependencies = ["numpy>=1.21"]
 classifiers = [
   "Development Status :: 4 - Beta",

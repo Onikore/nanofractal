@@ -58,7 +58,16 @@
 #include <opencv2/imgproc.hpp>
 // nanofractal patch: removed unused <opencv2/highgui.hpp> so a minimal OpenCV
 // (no highgui module) suffices; detection calls no highgui functions.
+// nanofractal patch: OpenCV 5 moved findHomography to the geometry module and
+// renamed features2d -> features; include whichever the linked OpenCV has.
+#include <opencv2/core/version.hpp>
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp>
+#include <opencv2/features.hpp>
+#else
 #include <opencv2/calib3d.hpp>
+#include <opencv2/features2d.hpp>
+#endif
 
 #include <map>
 #include <iostream>

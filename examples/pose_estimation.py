@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
-"""Estimate ArUco marker pose from an image.
+"""Estimate the pose of a fractal marker from an image.
 
-This script detects ArUco markers and estimates their 3D pose in the camera frame,
-including reprojection error. If opencv-python is available, also draws pose axes.
+Detects the marker with inner-corner correspondences (occlusion-robust, many
+points) and solves its 6-DoF pose in the camera frame, reporting the RMS
+reprojection error. With opencv-python installed the annotated image is saved.
 
 Usage:
-    python examples/pose_estimation.py [image_path]
+    python examples/pose_estimation.py [image_path] [--config FRACTAL_5L_6] [--size 0.2]
 """
 
-import sys
+import argparse
 
 import numpy as np
 
@@ -16,104 +17,54 @@ import nanofractal as nf
 
 
 def main():
-    # Check if an image path was provided
-    image_path = sys.argv[1] if len(sys.argv) > 1 else None
+    ap = argparse.ArgumentParser()
+    ap.add_argument("image", nargs="?")
+    ap.add_argument("--config", default="FRACTAL_5L_6")
+    ap.add_argument("--size", type=float, default=0.2, help="marker side in metres")
+    args = ap.parse_args()
 
-    # Try to load the image
     image = None
-    if image_path:
+    if args.image:
         try:
             import cv2
 
-            image = cv2.imread(image_path)
+            image = cv2.imread(args.image)
             if image is None:
-                print(f"Error: Could not load image from {image_path}")
-                sys.exit(1)
+                raise SystemExit(f"Error: could not load image from {args.image}")
         except ImportError:
-            print(
-                "Warning: opencv-python not available; cannot load image. "
-                "Generating a fallback marker."
-            )
+            print("Warning: opencv-python not available; generating a fallback marker.")
 
-    # If no image loaded, generate a fallback marker
     if image is None:
-        print("Generating a fallback ArUco marker (id=0, DICT_4X4_50)...")
-        marker = nf.generate_aruco(0, size_px=300, dictionary=nf.Dict.DICT_4X4_50)
-        # Create a white canvas and place the marker in the center
-        canvas_size = 500
-        image = np.full((canvas_size, canvas_size), 255, dtype=np.uint8)
-        offset = (canvas_size - 300) // 2
-        image[offset : offset + 300, offset : offset + 300] = marker
+        print(f"Generating a fallback {args.config} marker...")
+        image = np.full((900, 900), 255, dtype=np.uint8)
+        image[100:800, 100:800] = nf.generate_fractal(args.config, size_px=700)
 
-    # Convert to BGR if grayscale
-    if image.ndim == 2:
-        img_bgr = np.stack([image, image, image], axis=2)
-    else:
-        img_bgr = image.copy()
-
+    img_bgr = np.stack([image] * 3, axis=2) if image.ndim == 2 else image.copy()
     H, W = img_bgr.shape[:2]
+    camera_matrix = np.array([[W, 0, W / 2], [0, W, H / 2], [0, 0, 1]], dtype=np.float64)
+    dist_coeffs = np.zeros(5, dtype=np.float64)
 
-    # Create a simple camera matrix (assuming ~50 degree FOV for VGA)
-    focal_length = W
-    camera_matrix = np.array(
-        [[focal_length, 0, W / 2], [0, focal_length, H / 2], [0, 0, 1]], dtype=np.float64
-    )
-    # No distortion for simplicity
-    dist_coeffs = np.zeros(4, dtype=np.float64)
+    detector = nf.FractalDetector(args.config, marker_size=args.size)
+    result = detector.detect(img_bgr, with_inner_points=True)
+    print(f"Detected levels {result.ids.tolist()}, {len(result.points_2d)} inner points")
 
-    print(f"Camera matrix:\n{camera_matrix}")
-    print(f"Image shape: {img_bgr.shape}")
-
-    # Detect markers
-    print("Detecting markers...")
-    detector = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
-    result = detector.detect(img_bgr)
-
-    print(f"Detected {len(result)} marker(s)")
-
-    if len(result) == 0:
-        print("No markers detected.")
+    pose = detector.estimate_pose(result, camera_matrix, dist_coeffs)
+    if pose is None:
+        print("No marker detected.")
         return
+    rvec, tvec, err = pose
+    print(f"rvec: {rvec}\ntvec: {tvec}\nreproj_error: {err:.4f} px")
 
-    # Estimate pose with reprojection error
-    marker_size = 0.05  # 5 cm
-    print(f"\nEstimating pose (marker_size={marker_size} m)...")
-    rvecs, tvecs, reproj_errs = detector.estimate_pose(
-        result.corners, camera_matrix, dist_coeffs, marker_size, return_reproj=True
+    annotated = detector.draw(
+        img_bgr, result, camera_matrix, dist_coeffs, rvec, tvec, inplace=False
     )
-
-    print("Pose estimates:")
-    for i, (mid, corners) in enumerate(result):
-        print(f"  ID {mid}:")
-        print(f"    rvec: {rvecs[i]}")
-        print(f"    tvec: {tvecs[i]}")
-        print(f"    reproj_error: {reproj_errs[i]:.4f} px")
-
-    # Draw detections and axes if cv2 is available
     try:
-        annotated = detector.draw(
-            img_bgr,
-            result,
-            camera_matrix=camera_matrix,
-            dist_coeffs=dist_coeffs,
-            rvecs=rvecs,
-            tvecs=tvecs,
-            marker_size=marker_size,
-            axis_length=marker_size * 0.5,
-            inplace=False,
-        )
+        import cv2
 
-        try:
-            import cv2
-
-            output_path = "pose_estimation.png"
-            cv2.imwrite(output_path, annotated)
-            print(f"\nSaved pose visualization to {output_path}")
-        except ImportError:
-            print("\nWarning: opencv-python not available for saving annotated image")
-
-    except Exception as e:
-        print(f"Warning: Could not draw pose axes: {e}")
+        cv2.imwrite("pose_estimation.png", annotated)
+        print("Saved pose visualization to pose_estimation.png")
+    except ImportError:
+        print("opencv-python not available; not saving the annotated image")
 
 
 if __name__ == "__main__":

@@ -36,15 +36,6 @@ def _fisheye_project(obj, rvec, tvec, K, D):
     return np.stack([u, v], axis=1).astype(np.float32)
 
 
-def _aruco_scene(marker_id=0, cell=40, margin=80):
-    grid = np.asarray(_nf._aruco_marker_image8(int(nf.Dict.DICT_4X4_50), marker_id))
-    up = np.kron(grid, np.ones((cell, cell), dtype=np.uint8))
-    h, w = up.shape
-    canvas = np.full((h + 2 * margin, w + 2 * margin), 255, dtype=np.uint8)
-    canvas[margin : margin + h, margin : margin + w] = up
-    return np.ascontiguousarray(canvas)
-
-
 def _cam(img, f=600.0):
     h, w = img.shape[:2]
     return np.array([[f, 0, w / 2.0], [0, f, h / 2.0], [0, 0, 1]], dtype=np.float64)
@@ -55,16 +46,8 @@ def _cam(img, f=600.0):
 # ---------------------------------------------------------------------------
 
 
-def test_fisheye_requires_4_coeffs_aruco():
-    img = _aruco_scene(7)
-    det = nf.ArucoDetector(nf.Dict.DICT_4X4_50, max_attempts=10)
-    res = det.detect(img)
-    with pytest.raises(ValueError, match="fisheye"):
-        det.estimate_pose(res.corners, _cam(img), np.zeros(5), 0.05, fisheye=True)
-
-
 def test_fisheye_requires_4_coeffs_fractal():
-    img = _aruco_scene(7)  # any detection result; the check is on dist length
+    img = np.zeros((480, 640), dtype=np.uint8)  # only the shape matters for _cam
     fdet = nf.FractalDetector(CONFIG, marker_size=0.85)
     res = nf.DetectionResult(ids=np.zeros(0, np.int32), corners=np.zeros((0, 4, 2), np.float32))
     with pytest.raises(ValueError, match="fisheye"):
@@ -76,7 +59,9 @@ def test_fisheye_requires_4_coeffs_fractal():
 # ---------------------------------------------------------------------------
 
 
-def test_fisheye_roundtrip_recovers_pose_aruco():
+def test_fisheye_roundtrip_recovers_pose_outer_corners():
+    # Outer-corner fallback: exact fisheye-projected corners of a square of side
+    # marker_size must recover the pose.
     s = 0.1
     obj = np.array(
         [[-s / 2, s / 2, 0], [s / 2, s / 2, 0], [s / 2, -s / 2, 0], [-s / 2, -s / 2, 0]],
@@ -87,12 +72,13 @@ def test_fisheye_roundtrip_recovers_pose_aruco():
     K = np.array([[300.0, 0, 320], [0, 300.0, 240], [0, 0, 1]], dtype=np.float64)
     D = np.array([-0.10, 0.02, 0.0, 0.0], dtype=np.float64)  # fisheye k1..k4
 
-    corners = _fisheye_project(obj, rvec_gt, tvec_gt, K, D).reshape(1, 4, 2)
-    det = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
-    rv, tv, errs = det.estimate_pose(corners, K, D, s, return_reproj=True, fisheye=True)
-    np.testing.assert_allclose(tv[0], tvec_gt, atol=3e-3)
-    np.testing.assert_allclose(rv[0], rvec_gt, atol=2e-2)
-    assert errs[0] < 0.5  # data is exact → near-zero reprojection error
+    corners = _fisheye_project(obj, rvec_gt, tvec_gt, K, D).reshape(1, 4, 2).astype(np.float32)
+    det = nf.FractalDetector(CONFIG, marker_size=s)
+    res = nf.DetectionResult(ids=np.zeros(1, np.int32), corners=corners)
+    rv, tv, err = det.estimate_pose(res, K, D, fisheye=True)
+    np.testing.assert_allclose(tv, tvec_gt, atol=3e-3)
+    np.testing.assert_allclose(rv, rvec_gt, atol=2e-2)
+    assert err < 0.5  # data is exact -> near-zero reprojection error
 
 
 def test_fisheye_roundtrip_recovers_pose_fractal():
@@ -127,16 +113,3 @@ def test_fisheye_roundtrip_recovers_pose_fractal():
     np.testing.assert_allclose(tv, tvec_gt, atol=5e-3)
     np.testing.assert_allclose(rv, rvec_gt, atol=3e-2)
     assert err < 0.5
-
-
-def test_fisheye_reproj_finite_on_real_corners_aruco():
-    # Real (pinhole-rendered) corners treated as fisheye: the undistort→solve→
-    # fisheye-reproject loop is self-consistent, so the error stays finite/small.
-    img = _aruco_scene(7)
-    det = nf.ArucoDetector(nf.Dict.DICT_4X4_50, max_attempts=10)
-    res = det.detect(img)
-    rv, tv, errs = det.estimate_pose(
-        res.corners, _cam(img), np.zeros(4), 0.05, return_reproj=True, fisheye=True
-    )
-    assert errs.shape == (len(res),)
-    assert np.isfinite(errs).all()

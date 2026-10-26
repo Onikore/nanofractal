@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from enum import IntEnum
 
 import numpy as np
 
@@ -149,34 +148,12 @@ def _draw_target(image: np.ndarray, inplace: bool) -> np.ndarray:
     return np.ascontiguousarray(image).copy()
 
 
-class Dict(IntEnum):
-    ARUCO_MIP_36h12 = 0
-    APRILTAG_36h11 = 1
-    DICT_4X4_50 = 2
-    DICT_4X4_100 = 3
-    DICT_4X4_250 = 4
-    DICT_4X4_1000 = 5
-    DICT_5X5_50 = 6
-    DICT_5X5_100 = 7
-    DICT_5X5_250 = 8
-    DICT_5X5_1000 = 9
-    DICT_6X6_50 = 10
-    DICT_6X6_100 = 11
-    DICT_6X6_250 = 12
-    DICT_6X6_1000 = 13
-    DICT_7X7_50 = 14
-    DICT_7X7_100 = 15
-    DICT_7X7_250 = 16
-    DICT_7X7_1000 = 17
-
-
 @dataclass(repr=False)
 class DetectionResult:
     ids: np.ndarray  # int32 (N,)
     corners: np.ndarray  # float32 (N, 4, 2)
     # points_2d / points_3d are populated only by FractalDetector.detect(
-    # ..., with_inner_points=True); they stay None for ArUco and plain fractal
-    # detection.
+    # ..., with_inner_points=True); they stay None for plain detection.
     points_2d: np.ndarray | None = None  # float32 (M, 2)
     points_3d: np.ndarray | None = None  # float32 (M, 3)
 
@@ -201,147 +178,6 @@ class DetectionResult:
         else:
             ids_str = str(ids_list)
         return f"DetectionResult(n={n}, ids={ids_str})"
-
-
-class ArucoDetector:
-    def __init__(
-        self,
-        dictionary: Dict = Dict.ARUCO_MIP_36h12,
-        max_attempts: int = 1,
-        params: "DetectorParams | None" = None,
-    ) -> None:
-        self.dictionary = Dict(dictionary)
-        p = params if params is not None else _nf.DetectorParams()
-        self._d = _nf.ArucoDetector(int(dictionary), int(max_attempts), p)
-
-    @property
-    def max_attempts(self) -> int:
-        return self._d.max_attempts
-
-    @property
-    def params(self) -> "DetectorParams":
-        return self._d.params
-
-    @params.setter
-    def params(self, value: "DetectorParams") -> None:
-        self._d.params = value
-
-    def __repr__(self) -> str:
-        return f"ArucoDetector(dictionary={self.dictionary.name}, max_attempts={self.max_attempts})"
-
-    def detect(
-        self,
-        image: np.ndarray,
-        roi: "tuple[int, int, int, int] | None" = None,
-    ) -> DetectionResult:
-        _validate_params(self._d.params)
-        if roi is not None:
-            rx, ry, rw, rh = _validate_roi(roi, image)
-            ids, corners = self._d.detect(image, rx, ry, rw, rh)
-        else:
-            ids, corners = self._d.detect(image)
-        return DetectionResult(ids=ids, corners=corners)
-
-    def detect_batch(
-        self,
-        images,
-        num_threads: int = 0,
-        roi: "tuple[int, int, int, int] | None" = None,
-    ) -> list[DetectionResult]:
-        """Detect markers in many images in parallel (0 = use all cores)."""
-        _validate_params(self._d.params)
-        imgs = list(images)
-        if roi is not None:
-            for img in imgs:
-                _validate_roi(roi, img)
-            rx, ry, rw, rh = int(roi[0]), int(roi[1]), int(roi[2]), int(roi[3])
-            results = self._d.detect_batch(imgs, int(num_threads), rx, ry, rw, rh)
-        else:
-            results = self._d.detect_batch(imgs, int(num_threads))
-        return [DetectionResult(ids=i, corners=c) for i, c in results]
-
-    def estimate_pose(
-        self,
-        corners: np.ndarray,
-        camera_matrix: np.ndarray,
-        dist_coeffs: np.ndarray,
-        marker_size: float,
-        return_reproj: bool = False,
-        fisheye: bool = False,
-    ):
-        """Per-marker pose via solvePnP IPPE_SQUARE.
-
-        corners: float32 (N,4,2) as returned by detect().
-        camera_matrix: float64 (3,3) intrinsic matrix (must be finite).
-        dist_coeffs: float64 (K,) distortion coefficients.
-        marker_size: physical side length of the marker in the same unit as tvecs.
-        return_reproj: when False (default) returns (rvecs, tvecs), each float64
-            (N,3) — identical to previous behaviour.  When True returns
-            (rvecs, tvecs, reproj_errs) where reproj_errs is float64 (N,) with the
-            per-marker RMS reprojection error in pixels.
-        fisheye: when True, treat (camera_matrix, dist_coeffs) as the OpenCV
-            fisheye model — dist_coeffs must be exactly 4 (k1,k2,k3,k4). Corners
-            are undistorted through the fisheye model before solving, and the
-            reprojection error (if requested) is measured against the original
-            observations with fisheye projection.
-        """
-        corners = np.ascontiguousarray(corners, dtype=np.float32)
-        camera_matrix = np.ascontiguousarray(camera_matrix, dtype=np.float64)
-        dist_coeffs = np.ascontiguousarray(dist_coeffs, dtype=np.float64)
-        _validate_camera(camera_matrix, dist_coeffs)
-        if fisheye and dist_coeffs.shape[0] != 4:
-            raise ValueError(
-                "fisheye=True requires exactly 4 distortion coefficients "
-                f"(k1,k2,k3,k4), got {dist_coeffs.shape[0]}"
-            )
-        return self._d.estimate_pose(
-            corners,
-            camera_matrix,
-            dist_coeffs,
-            float(marker_size),
-            bool(return_reproj),
-            bool(fisheye),
-        )
-
-    def draw(
-        self,
-        image: np.ndarray,
-        result: DetectionResult,
-        camera_matrix: np.ndarray | None = None,
-        dist_coeffs: np.ndarray | None = None,
-        rvecs: np.ndarray | None = None,
-        tvecs: np.ndarray | None = None,
-        marker_size: float | None = None,
-        axis_length: float | None = None,
-        inplace: bool = True,
-    ) -> np.ndarray:
-        """Draw marker outlines (+ ids) for every detected marker; with poses
-        (``camera_matrix``, ``dist_coeffs``, ``rvecs``, ``tvecs`` as returned by
-        :meth:`estimate_pose`, each ``(N,3)``) also draw a frame-axis triad per
-        marker.
-
-        ``inplace=True`` (default) draws onto ``image`` and returns it (``image``
-        must be writable, contiguous uint8, BGR for colour); ``inplace=False``
-        draws on a copy and returns it. ``axis_length`` defaults to half
-        ``marker_size`` when given, else ``1.0``.
-        """
-        target = _draw_target(image, inplace)
-        corners = np.ascontiguousarray(result.corners, dtype=np.float32)
-        ids = np.ascontiguousarray(result.ids, dtype=np.int32)
-        axes = all(v is not None for v in (camera_matrix, dist_coeffs, rvecs, tvecs))
-        if axes:
-            cam = np.ascontiguousarray(camera_matrix, dtype=np.float64)
-            dist = np.ascontiguousarray(dist_coeffs, dtype=np.float64)
-            rv = np.ascontiguousarray(np.asarray(rvecs, dtype=np.float64).reshape(-1, 3))
-            tv = np.ascontiguousarray(np.asarray(tvecs, dtype=np.float64).reshape(-1, 3))
-            if axis_length is None:
-                axis_length = marker_size * 0.5 if marker_size and marker_size > 0 else 1.0
-        else:
-            cam = dist = np.zeros(0, dtype=np.float64)
-            rv = tv = np.zeros((0, 3), dtype=np.float64)
-            axis_length = 0.0
-        self._d.draw(target, corners, ids, bool(axes), cam, dist, rv, tv, float(axis_length))
-        return target
 
 
 _FRACTAL_CONFIGS = {"FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"}
@@ -506,7 +342,7 @@ def refine_corners(
         converts BGR to grayscale internally.
     corners : np.ndarray
         Detected corners, ``float32 (N, 4, 2)``, as returned by
-        :meth:`ArucoDetector.detect` or :meth:`FractalDetector.detect`.
+        :meth:`FractalDetector.detect`.
     win_size : int, optional
         Half-size of the search window (must be >= 1). Default is 5.
 
@@ -527,102 +363,15 @@ def refine_corners(
     return np.asarray(_nf._refine_corners(image, corners, int(win_size)))
 
 
-def to_opencv(
-    result: DetectionResult,
-) -> "tuple[list[np.ndarray], np.ndarray]":
-    """Convert a :class:`DetectionResult` to the ``cv2.aruco.detectMarkers`` format.
-
-    Parameters
-    ----------
-    result : DetectionResult
-        Detection result from :meth:`ArucoDetector.detect` or similar.
-
-    Returns
-    -------
-    corners : list[np.ndarray]
-        One ``float32 (1, 4, 2)`` array per detected marker — exactly the
-        format that ``cv2.aruco.detectMarkers`` returns for its *corners*
-        output.
-    ids : np.ndarray
-        ``int32 (N, 1)`` array of marker ids.  For an empty result returns
-        ``np.zeros((0, 1), np.int32)`` rather than ``None`` (unlike cv2).
-    """
-    n = len(result)
-    if n == 0:
-        return [], np.zeros((0, 1), dtype=np.int32)
-    corners = [result.corners[i].reshape(1, 4, 2).astype(np.float32) for i in range(n)]
-    ids = result.ids.reshape(-1, 1).astype(np.int32)
-    return corners, ids
-
-
-def from_opencv(corners, ids) -> DetectionResult:
-    """Build a :class:`DetectionResult` from ``cv2.aruco.detectMarkers`` output.
-
-    Parameters
-    ----------
-    corners : sequence of np.ndarray
-        Each element is ``(1, 4, 2)`` or ``(4, 2)`` float32, as returned by
-        ``cv2.aruco.detectMarkers``.
-    ids : np.ndarray or None
-        ``int32 (N, 1)`` or ``(N,)`` array of marker ids, or ``None``
-        (cv2 returns ``None`` when no markers are found).
-
-    Returns
-    -------
-    DetectionResult
-        ``points_2d`` and ``points_3d`` are always ``None`` (they are not
-        encoded in the cv2 format).
-    """
-    _empty = DetectionResult(
-        ids=np.zeros(0, dtype=np.int32),
-        corners=np.zeros((0, 4, 2), dtype=np.float32),
-    )
-    if ids is None:
-        return _empty
-    ids_arr = np.asarray(ids, dtype=np.int32).ravel()
-    n = len(ids_arr)
-    if n == 0:
-        return _empty
-    corners_list = [np.asarray(c, dtype=np.float32).reshape(4, 2) for c in corners]
-    corners_arr = np.stack(corners_list, axis=0)
-    return DetectionResult(ids=ids_arr, corners=corners_arr)
-
-
-def dict_grid_size(d: Dict) -> int:
-    """Full marker grid size in cells including border.
-
-    For example DICT_4X4 (4-bit inner + 2 border cells) returns 6.
-    """
-    return _nf._dict_grid_size(int(d))
-
-
-def dict_num_markers(d: Dict) -> int:
-    """Number of markers in the dictionary.
-
-    Raises ValueError for unknown dictionary identifiers.
-    """
-    return _nf._dict_num_markers(int(d))
-
-
-# generate.py uses a lazy import for Dict to avoid the circular-import cycle
-# (this module imports generate; generate would need Dict from this module).
-# Safe to import here because Dict is already defined above.
-from .generate import generate_aruco, generate_fractal  # noqa: E402
+from .generate import generate_fractal  # noqa: E402
 from .smoother import PoseSmoother  # noqa: E402
 
 __all__ = [
     "__version__",
-    "Dict",
     "DetectionResult",
     "DetectorParams",
-    "ArucoDetector",
     "FractalDetector",
-    "dict_grid_size",
-    "dict_num_markers",
-    "generate_aruco",
     "generate_fractal",
     "PoseSmoother",
     "refine_corners",
-    "to_opencv",
-    "from_opencv",
 ]

@@ -96,66 +96,6 @@ def test_validate_camera_allowed_lengths_listed_in_message():
 
 
 # ---------------------------------------------------------------------------
-# ArucoDetector.estimate_pose integration
-# ---------------------------------------------------------------------------
-
-
-def _aruco_det():
-    return nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
-
-
-def test_aruco_estimate_pose_empty_corners_valid_cam_passes():
-    """Empty corners with a valid camera must not raise (validation runs before solvePnP)."""
-    det = _aruco_det()
-    empty = np.zeros((0, 4, 2), dtype=np.float32)
-    rvecs, tvecs = det.estimate_pose(empty, _good_K(), _good_D(5), marker_size=0.05)
-    assert rvecs.shape == (0, 3)
-    assert tvecs.shape == (0, 3)
-
-
-def test_aruco_estimate_pose_K_wrong_shape_raises():
-    det = _aruco_det()
-    empty = np.zeros((0, 4, 2), dtype=np.float32)
-    with pytest.raises(ValueError):
-        det.estimate_pose(empty, np.eye(2, dtype=np.float64), _good_D(), marker_size=0.05)
-
-
-def test_aruco_estimate_pose_D_bad_length_raises():
-    det = _aruco_det()
-    empty = np.zeros((0, 4, 2), dtype=np.float32)
-    with pytest.raises(ValueError):
-        det.estimate_pose(empty, _good_K(), np.zeros(3, dtype=np.float64), marker_size=0.05)
-
-
-def test_aruco_estimate_pose_K_nan_raises():
-    det = _aruco_det()
-    empty = np.zeros((0, 4, 2), dtype=np.float32)
-    K = _good_K()
-    K[0, 0] = float("nan")
-    with pytest.raises(ValueError, match="finite"):
-        det.estimate_pose(empty, K, _good_D(), marker_size=0.05)
-
-
-def test_aruco_estimate_pose_D_nan_raises():
-    det = _aruco_det()
-    empty = np.zeros((0, 4, 2), dtype=np.float32)
-    D = _good_D()
-    D[1] = float("nan")
-    with pytest.raises(ValueError, match="finite"):
-        det.estimate_pose(empty, _good_K(), D, marker_size=0.05)
-
-
-def test_aruco_estimate_pose_D_length_5_passes():
-    """Existing tests use 5-element D — must remain valid."""
-    det = _aruco_det()
-    empty = np.zeros((0, 4, 2), dtype=np.float32)
-    rvecs, tvecs = det.estimate_pose(
-        empty, _good_K(), np.zeros(5, dtype=np.float64), marker_size=0.05
-    )
-    assert rvecs.shape == (0, 3)
-
-
-# ---------------------------------------------------------------------------
 # FractalDetector.estimate_pose integration
 # ---------------------------------------------------------------------------
 

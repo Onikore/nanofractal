@@ -1,6 +1,3 @@
-#include "aruco_dicts.hpp"
-#include "aruco_nano_v6.h"
-#include "aruco_std_dicts.hpp"
 #include "detector_params.h"
 #include "nanofractal.h"
 #include "ndarray_cv.hpp"
@@ -11,66 +8,20 @@
 #include <nanobind/nanobind.h>
 #include <nanobind/stl/string.h>
 #include <nanobind/stl/vector.h>
-#include <opencv2/calib3d.hpp> // solvePnP, projectPoints, cv::fisheye
 #include <opencv2/core.hpp>
-#include <opencv2/features2d.hpp> // FastFeatureDetector, used by nanofractal.h
+#if CV_VERSION_MAJOR >= 5
+#include <opencv2/geometry.hpp> // solvePnP, projectPoints, cv::fisheye
+#else
+#include <opencv2/calib3d.hpp> // solvePnP, projectPoints, cv::fisheye
+#endif
 #include <opencv2/imgproc.hpp>    // cornerSubPix, cvtColor
 #include <string>
 #include <thread>
 
 namespace nb = nanobind;
 
-// Pointer to the static, immutable marker-code table for a dictionary id, or
-// nullptr for an unknown id. The tables live in static storage (aruco_dicts /
-// aruco_std_dicts), so callers get a zero-copy handle they can cache and reuse
-// across frames instead of rebuilding the table on every detect() call.
-static const std::vector<uint64_t> *aruco_dict_codes(int dict) {
-  using D = aruconano::MarkerDetector::Dict;
-  switch ((D)dict) {
-  case D::ARUCO_MIP_36h12:
-    return &aruco_dicts::mip_36h12();
-  case D::APRILTAG_36h11:
-    return &aruco_dicts::apriltag_36h11();
-  case D::DICT_4X4_50:
-    return &aruco_std_dicts::DICT_4X4_50();
-  case D::DICT_4X4_100:
-    return &aruco_std_dicts::DICT_4X4_100();
-  case D::DICT_4X4_250:
-    return &aruco_std_dicts::DICT_4X4_250();
-  case D::DICT_4X4_1000:
-    return &aruco_std_dicts::DICT_4X4_1000();
-  case D::DICT_5X5_50:
-    return &aruco_std_dicts::DICT_5X5_50();
-  case D::DICT_5X5_100:
-    return &aruco_std_dicts::DICT_5X5_100();
-  case D::DICT_5X5_250:
-    return &aruco_std_dicts::DICT_5X5_250();
-  case D::DICT_5X5_1000:
-    return &aruco_std_dicts::DICT_5X5_1000();
-  case D::DICT_6X6_50:
-    return &aruco_std_dicts::DICT_6X6_50();
-  case D::DICT_6X6_100:
-    return &aruco_std_dicts::DICT_6X6_100();
-  case D::DICT_6X6_250:
-    return &aruco_std_dicts::DICT_6X6_250();
-  case D::DICT_6X6_1000:
-    return &aruco_std_dicts::DICT_6X6_1000();
-  case D::DICT_7X7_50:
-    return &aruco_std_dicts::DICT_7X7_50();
-  case D::DICT_7X7_100:
-    return &aruco_std_dicts::DICT_7X7_100();
-  case D::DICT_7X7_250:
-    return &aruco_std_dicts::DICT_7X7_250();
-  case D::DICT_7X7_1000:
-    return &aruco_std_dicts::DICT_7X7_1000();
-  }
-  return nullptr;
-}
-
-// Shared drawing primitive used by both detectors: green marker outline, a red
-// dot on the first corner, and the blue id text at the marker centre. Operates
-// on the cv::Mat in place. Kept at file scope so ArucoDetectorImpl::draw and
-// FractalDetectorImpl::draw share one implementation.
+// Drawing primitive: green marker outline, a red dot on the first corner, and
+// the blue id text at the marker centre. Operates on the cv::Mat in place.
 static void draw_outlines_ids(cv::Mat &im, const F32Arr &corners,
                               const I32Arr &ids) {
   int lw = std::max(1, im.cols / 500);
@@ -96,250 +47,6 @@ static void draw_outlines_ids(cv::Mat &im, const F32Arr &corners,
     }
   }
 }
-
-// ---- ArUco Nano v6 ----
-// Defined at namespace scope (not inside NB_MODULE) so it is a non-local type,
-// which is the conventional, portable way to use it as a nb::class_ template
-// arg.
-struct ArucoDetectorImpl {
-  int dict;
-  unsigned max_attempts;
-  DetectorParams params;
-  // Cached zero-copy handle to the dictionary's code table (set once at
-  // construction). Shared read-only across detect_batch worker threads.
-  const std::vector<uint64_t> *codes = nullptr;
-
-  ArucoDetectorImpl(int dictionary, unsigned attempts, DetectorParams p = {})
-      : params(p) {
-    if (dictionary < 0 || dictionary > 17)
-      throw nb::value_error(
-          "dictionary must be a valid Dict enum value (0–17)");
-    dict = dictionary;
-    max_attempts = attempts ? attempts : 1u;
-    codes = aruco_dict_codes(dictionary); // non-null: dictionary is validated
-  }
-
-  nb::tuple detect(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
-                   int rh = -1) {
-    cv::Mat im = as_image(arr);
-    bool has_roi = (rw > 0 && rh > 0);
-    cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
-    std::vector<aruconano::Marker> markers;
-    {
-      nb::gil_scoped_release rel;
-      markers = aruconano::MarkerDetector::detect(
-          work, max_attempts, (aruconano::MarkerDetector::Dict)dict, params,
-          *codes);
-    }
-    size_t n = markers.size();
-    std::vector<int32_t> ids(n);
-    std::vector<float> corners(n * 8);
-    float ox = has_roi ? (float)rx : 0.f;
-    float oy = has_roi ? (float)ry : 0.f;
-    for (size_t i = 0; i < n; i++) {
-      ids[i] = markers[i].id;
-      for (int c = 0; c < 4; c++) {
-        corners[i * 8 + c * 2 + 0] = markers[i][c].x + ox;
-        corners[i * 8 + c * 2 + 1] = markers[i][c].y + oy;
-      }
-    }
-    return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                          corners_to_numpy(std::move(corners), n));
-  }
-
-  // Batched pose: for each marker's 4 corners, solvePnP (IPPE_SQUARE) against a
-  // square of side marker_size. Returns (rvecs (N,3), tvecs (N,3)) float64, or
-  // optionally (rvecs, tvecs, reproj_errs (N,)) when return_reproj=true.
-  // OpenCV exceptions are caught inside the GIL-released scope, captured as a
-  // string, and re-thrown as nb::value_error once the GIL is reacquired.
-  nb::tuple estimate_pose(F32Arr corners, F64Arr cam, F64Arr dist,
-                          double marker_size, bool return_reproj = false,
-                          bool fisheye = false) {
-    if (corners.ndim() != 3 || corners.shape(1) != 4 || corners.shape(2) != 2)
-      throw nb::value_error("corners must be float32 (N,4,2)");
-    if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
-      throw nb::value_error("camera_matrix must be float64 (3,3)");
-    if (dist.ndim() != 1)
-      throw nb::value_error("dist_coeffs must be 1-D float64");
-    size_t n = corners.shape(0);
-    // const_cast is safe: solvePnP only reads camera/dist, and the facade
-    // passes freshly-made contiguous arrays (no aliasing with outputs).
-    cv::Mat camMat(3, 3, CV_64F, const_cast<double *>(cam.data()));
-    cv::Mat distMat((int)dist.shape(0), 1, CV_64F,
-                    const_cast<double *>(dist.data()));
-
-    // Canonical IPPE_SQUARE object-point order (y up, z out of board):
-    //   TL, TR, BR, BL — matches the clockwise corner order from the detector.
-    float s = (float)marker_size;
-    std::vector<cv::Point3f> obj = {
-        {-s / 2.f, +s / 2.f, 0.f},
-        {+s / 2.f, +s / 2.f, 0.f},
-        {+s / 2.f, -s / 2.f, 0.f},
-        {-s / 2.f, -s / 2.f, 0.f},
-    };
-
-    std::vector<double> rvecs(n * 3), tvecs(n * 3);
-    std::vector<double> reproj_errs(n, 0.0);
-    bool cv_ok = true;
-    std::string cv_err;
-    {
-      nb::gil_scoped_release rel;
-      for (size_t i = 0; i < n && cv_ok; i++) {
-        std::vector<cv::Point2f> img_pts(4);
-        for (int c = 0; c < 4; c++)
-          img_pts[c] = cv::Point2f(corners.data()[i * 8 + c * 2 + 0],
-                                   corners.data()[i * 8 + c * 2 + 1]);
-        cv::Mat rvec, tvec;
-        try {
-          // Fisheye: undistort the observed corners through the fisheye
-          // model into pinhole-pixel coordinates (P = K), then solve with
-          // zero distortion. solvePnP has no native fisheye model.
-          std::vector<cv::Point2f> img_solve;
-          cv::Mat dist_solve;
-          if (fisheye) {
-            cv::fisheye::undistortPoints(img_pts, img_solve, camMat, distMat,
-                                         cv::noArray(), camMat);
-            dist_solve = cv::Mat::zeros(4, 1, CV_64F);
-          } else {
-            img_solve = img_pts;
-            dist_solve = distMat;
-          }
-          cv::solvePnP(obj, img_solve, camMat, dist_solve, rvec, tvec, false,
-                       cv::SOLVEPNP_IPPE_SQUARE);
-          for (int k = 0; k < 3; k++) {
-            rvecs[i * 3 + k] = rvec.at<double>(k);
-            tvecs[i * 3 + k] = tvec.at<double>(k);
-          }
-          if (return_reproj) {
-            // True image-space reprojection error vs the ORIGINAL
-            // (distorted) corners, using the matching projection model.
-            std::vector<cv::Point2f> proj;
-            if (fisheye)
-              cv::fisheye::projectPoints(
-                  cv::Mat(obj).reshape(3, (int)obj.size()), proj, rvec, tvec,
-                  camMat, distMat);
-            else
-              cv::projectPoints(obj, rvec, tvec, camMat, distMat, proj);
-            double se = 0;
-            for (int j = 0; j < 4; j++) {
-              double dx = proj[j].x - img_pts[j].x;
-              double dy = proj[j].y - img_pts[j].y;
-              se += dx * dx + dy * dy;
-            }
-            reproj_errs[i] = std::sqrt(se / 4.0);
-          }
-        } catch (const cv::Exception &e) {
-          cv_ok = false;
-          cv_err = e.what();
-        }
-      }
-    }
-    // Re-throw OpenCV failures as a readable Python ValueError (GIL held).
-    if (!cv_ok)
-      throw nb::value_error(("pose estimation failed: " + cv_err).c_str());
-
-    if (return_reproj)
-      return nb::make_tuple(
-          make_owned<double>(std::move(rvecs), {n, (size_t)3}),
-          make_owned<double>(std::move(tvecs), {n, (size_t)3}),
-          make_owned<double>(std::move(reproj_errs), {n}));
-    return nb::make_tuple(make_owned<double>(std::move(rvecs), {n, (size_t)3}),
-                          make_owned<double>(std::move(tvecs), {n, (size_t)3}));
-  }
-
-  // Parallel batch detection. MarkerDetector::detect is stateless, so all
-  // worker threads can share this detector. Inputs are validated/wrapped (GIL
-  // held), detection runs GIL-released across a thread pool, then results are
-  // marshaled to numpy (GIL held).
-  std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
-                                       int num_threads, int rx = -1,
-                                       int ry = -1, int rw = -1, int rh = -1) {
-    bool has_roi = (rw > 0 && rh > 0);
-    size_t N = imgs.size();
-    std::vector<cv::Mat> mats(N);
-    for (size_t i = 0; i < N; i++) {
-      cv::Mat full_im = as_image(imgs[i]);
-      mats[i] = has_roi ? full_im(cv::Rect(rx, ry, rw, rh)) : full_im;
-    }
-
-    std::vector<std::vector<int32_t>> all_ids(N);
-    std::vector<std::vector<float>> all_corners(N);
-    int T = num_threads > 0 ? num_threads
-                            : (int)std::thread::hardware_concurrency();
-    if (T < 1)
-      T = 1;
-    if (T > (int)N)
-      T = (int)N; // no point spawning more workers than images
-    int dict_ = dict;
-    unsigned attempts_ = max_attempts;
-    DetectorParams params_ = params;
-    const std::vector<uint64_t> *codes_ = codes; // shared read-only
-    float ox_ = has_roi ? (float)rx : 0.f;
-    float oy_ = has_roi ? (float)ry : 0.f;
-    if (N > 0) {
-      nb::gil_scoped_release rel;
-      std::atomic<size_t> next{0};
-      auto worker = [&]() {
-        size_t i;
-        while ((i = next.fetch_add(1)) < N) {
-          auto markers = aruconano::MarkerDetector::detect(
-              mats[i], attempts_, (aruconano::MarkerDetector::Dict)dict_,
-              params_, *codes_);
-          size_t n = markers.size();
-          all_ids[i].resize(n);
-          all_corners[i].resize(n * 8);
-          for (size_t k = 0; k < n; k++) {
-            all_ids[i][k] = markers[k].id;
-            for (int c = 0; c < 4; c++) {
-              all_corners[i][k * 8 + c * 2 + 0] = markers[k][c].x + ox_;
-              all_corners[i][k * 8 + c * 2 + 1] = markers[k][c].y + oy_;
-            }
-          }
-        }
-      };
-      std::vector<std::thread> ths;
-      for (int t = 0; t < T; t++)
-        ths.emplace_back(worker);
-      for (auto &x : ths)
-        x.join();
-    }
-    std::vector<nb::object> out;
-    out.reserve(N);
-    for (size_t i = 0; i < N; i++) {
-      size_t n = all_ids[i].size();
-      out.push_back(
-          nb::make_tuple(ids_to_numpy(std::move(all_ids[i])),
-                         corners_to_numpy(std::move(all_corners[i]), n)));
-    }
-    return out;
-  }
-
-  // Draw marker outlines (+ ids) and, when axes=true, ONE frame-axis triad per
-  // marker (ArUco poses are per-marker, so rvecs/tvecs are (N,3) as returned by
-  // estimate_pose). `image` must be a writable, contiguous uint8 array (BGR for
-  // colour); the Python facade handles the writable/copy policy via `inplace`.
-  void draw(RawArray image, F32Arr corners, I32Arr ids, bool axes, F64Arr cam,
-            F64Arr dist, F64Arr rvecs, F64Arr tvecs, double axis_length) {
-    cv::Mat im = as_image(image);
-    draw_outlines_ids(im, corners, ids);
-    if (axes) {
-      int lw = std::max(1, im.cols / 500);
-      cv::Mat camMat(3, 3, CV_64F, const_cast<double *>(cam.data()));
-      cv::Mat distMat((int)dist.shape(0), 1, CV_64F,
-                      const_cast<double *>(dist.data()));
-      size_t nr =
-          (rvecs.ndim() == 2 && rvecs.shape(1) == 3) ? rvecs.shape(0) : 0;
-      size_t nt =
-          (tvecs.ndim() == 2 && tvecs.shape(1) == 3) ? tvecs.shape(0) : 0;
-      size_t m = std::min(nr, nt);
-      for (size_t i = 0; i < m; i++) {
-        cv::Mat rv(3, 1, CV_64F, const_cast<double *>(rvecs.data() + i * 3));
-        cv::Mat tv(3, 1, CV_64F, const_cast<double *>(tvecs.data() + i * 3));
-        cv::drawFrameAxes(im, camMat, distMat, rv, tv, (float)axis_length, lw);
-      }
-    }
-  }
-};
 
 // ---- Fractal ----
 // FractalMarkerDetector::detect is non-const (map::operator[] is non-const; the
@@ -673,32 +380,11 @@ NB_MODULE(_nanofractal, m) {
     return corners_to_numpy(std::move(c), 2);
   });
 
-  // Render a marker as a (gsize x gsize) uint8 grid: black border + inner bits.
-  // Bit ordering matches touulong() in aruco_nano_v6.h. Test/tool use only.
-  m.def("_aruco_marker_image8", [](int dict, int id) {
-    const std::vector<uint64_t> *codes = aruco_dict_codes(dict);
-    if (!codes)
-      throw nb::value_error("unknown dict id");
-    if (id < 0 || (size_t)id >= codes->size())
-      throw nb::value_error("marker id out of range");
-    uint64_t code = (*codes)[id];
-    int gsize = aruconano::MarkerDetector::dictGridSize(
-        (aruconano::MarkerDetector::Dict)dict);
-    int n_bits = gsize - 2;
-    std::vector<uint8_t> grid((size_t)(gsize * gsize), 0);
-    int b = 0;
-    for (int y = n_bits - 1; y >= 0; y--)
-      for (int x = n_bits - 1; x >= 0; x--) {
-        grid[(y + 1) * gsize + (x + 1)] = ((code >> b++) & 1ULL) ? 255 : 0;
-      }
-    return make_owned<uint8_t>(std::move(grid), {(size_t)gsize, (size_t)gsize});
-  });
-
   // ---- DetectorParams ----
   nb::class_<DetectorParams>(m, "DetectorParams")
       .def(nb::init<>())
       .def_rw("min_contour_size", &DetectorParams::min_contour_size,
-              "-1 = detector default (ArUco: 50, Fractal: 120)")
+              "-1 = detector default (120)")
       .def_rw("adaptive_block_size", &DetectorParams::adaptive_block_size,
               "-1 = auto-scale with image width")
       .def_rw("adaptive_c", &DetectorParams::adaptive_c,
@@ -706,13 +392,12 @@ NB_MODULE(_nanofractal, m) {
       .def_rw("approx_poly_rate", &DetectorParams::approx_poly_rate,
               "contour approx epsilon = perimeter * rate (default 0.05)")
       .def_rw("subpix_win_size", &DetectorParams::subpix_win_size,
-              "corner sub-pixel half-window, Fractal only (-1 = default 4, 0 = "
-              "off)")
+              "corner sub-pixel half-window (-1 = default 4, 0 = off)")
       .def_rw(
           "kfilter_min_dist", &DetectorParams::kfilter_min_dist,
-          "min distance (px) between FAST keypoints, Fractal only (default 10)")
+          "min distance (px) between FAST keypoints (default 10)")
       .def_rw("detection_scale", &DetectorParams::detection_scale,
-              "downscale factor for the detection stage, both detectors "
+              "downscale factor for the detection stage "
               "(1.0 = full res; 0.5 ~= 4x faster; corners refined at full res)")
       .def("__repr__", [](const DetectorParams &p) {
         return "DetectorParams(min_contour_size=" +
@@ -724,28 +409,6 @@ NB_MODULE(_nanofractal, m) {
                ", kfilter_min_dist=" + std::to_string(p.kfilter_min_dist) +
                ", detection_scale=" + std::to_string(p.detection_scale) + ")";
       });
-
-  // ---- ArUco Nano v6 ----
-  nb::class_<ArucoDetectorImpl>(m, "ArucoDetector")
-      .def(nb::init<int, unsigned, DetectorParams>(), nb::arg("dictionary"),
-           nb::arg("max_attempts"), nb::arg("params") = DetectorParams{})
-      .def_ro("max_attempts", &ArucoDetectorImpl::max_attempts)
-      .def_ro("dictionary", &ArucoDetectorImpl::dict)
-      .def_rw("params", &ArucoDetectorImpl::params)
-      .def("detect", &ArucoDetectorImpl::detect, nb::arg("image"),
-           nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
-           nb::arg("rh") = -1)
-      .def("estimate_pose", &ArucoDetectorImpl::estimate_pose,
-           nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
-           nb::arg("marker_size"), nb::arg("return_reproj") = false,
-           nb::arg("fisheye") = false)
-      .def("detect_batch", &ArucoDetectorImpl::detect_batch, nb::arg("images"),
-           nb::arg("num_threads") = 0, nb::arg("rx") = -1, nb::arg("ry") = -1,
-           nb::arg("rw") = -1, nb::arg("rh") = -1)
-      .def("draw", &ArucoDetectorImpl::draw, nb::arg("image"),
-           nb::arg("corners"), nb::arg("ids"), nb::arg("axes"), nb::arg("cam"),
-           nb::arg("dist"), nb::arg("rvecs"), nb::arg("tvecs"),
-           nb::arg("axis_length"));
 
   // ---- Fractal ----
   nb::class_<FractalDetectorImpl>(m, "FractalDetector")
@@ -769,23 +432,6 @@ NB_MODULE(_nanofractal, m) {
            nb::arg("corners"), nb::arg("ids"), nb::arg("axes"), nb::arg("cam"),
            nb::arg("dist"), nb::arg("rvec"), nb::arg("tvec"),
            nb::arg("axis_length"));
-
-  // ---- Dict introspection helpers (Task D) ----
-  // Full grid size (inner bits + 2 border) for a dictionary id.
-  m.def("_dict_grid_size", [](int dict) -> int {
-    using D = aruconano::MarkerDetector::Dict;
-    if (dict < 0 || dict > 17)
-      throw nb::value_error("unknown dict id");
-    return aruconano::MarkerDetector::dictGridSize((D)dict);
-  });
-
-  // Number of markers in a dictionary's code table.
-  m.def("_dict_num_markers", [](int dict) -> int {
-    const std::vector<uint64_t> *codes = aruco_dict_codes(dict);
-    if (!codes)
-      throw nb::value_error("unknown dict id");
-    return (int)codes->size();
-  });
 
   // ---- B2: sub-pixel corner refinement ----
   // Refines detected corners to sub-pixel accuracy via cv::cornerSubPix.
@@ -823,6 +469,29 @@ NB_MODULE(_nanofractal, m) {
   m.def("_fractal_external_id", [](std::string config) {
     nanofractal::FractalMarkerSet s(config);
     return s.idExternal;
+  });
+
+  // Every marker level of a config as a list of (id, corners float32 (4,2) in
+  // normalized marker coords [-1,1] with y up, bits uint8 (K,K) 0/1). Used to
+  // render the full nested composite (generate_fractal) and by benchmarks.
+  m.def("_fractal_markers", [](std::string config) {
+    nanofractal::FractalMarkerSet s(config);
+    nb::list out;
+    for (auto &kv : s.fractalMarkerCollection) {
+      const nanofractal::FractalMarker &fm = kv.second;
+      std::vector<float> c(8);
+      for (int k = 0; k < 4; k++) {
+        c[k * 2 + 0] = fm.keypts[k].pt.x;
+        c[k * 2 + 1] = fm.keypts[k].pt.y;
+      }
+      cv::Mat M = fm.mat();
+      size_t K = (size_t)M.rows;
+      std::vector<uint8_t> bits(M.data, M.data + K * K);
+      out.append(nb::make_tuple(
+          fm.id, make_owned<float>(std::move(c), {(size_t)4, (size_t)2}),
+          make_owned<uint8_t>(std::move(bits), {K, K})));
+    }
+    return out;
   });
 
   m.def("_fractal_external_image8", [](std::string config) {

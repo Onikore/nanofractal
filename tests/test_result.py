@@ -176,32 +176,21 @@ def test_repr_truncates_many_ids():
 
 
 # ---------------------------------------------------------------------------
-# Integration test — real ArUco detection
+# Integration test — real fractal detection
 # ---------------------------------------------------------------------------
 
 
-def _render_aruco(
-    marker_id: int, dictionary: int = 0, cell: int = 40, margin: int = 60
-) -> np.ndarray:
-    grid = np.asarray(_nf._aruco_marker_image8(dictionary, marker_id))
-    marker = np.kron(grid, np.ones((cell, cell), dtype=np.uint8))
-    h, w = marker.shape
-    canvas = np.full((h + 2 * margin, w + 2 * margin), 255, dtype=np.uint8)
-    canvas[margin : margin + h, margin : margin + w] = marker
-    return np.ascontiguousarray(canvas)
+def test_integration_real_fractal_len_and_iter():
+    """Run a real fractal detection and verify len/__iter__ work on the result."""
+    cfg = "FRACTAL_5L_6"
+    marker = nf.generate_fractal(cfg, size_px=780)
+    img = np.full((940, 940), 255, dtype=np.uint8)
+    img[80:860, 80:860] = marker
+    res = nf.FractalDetector(cfg).detect(img)
 
-
-def test_integration_real_aruco_len_and_iter():
-    """Run a real ArUco detection and verify len/__iter__ work on the result."""
-    img = _render_aruco(7, dictionary=int(nf.Dict.ARUCO_MIP_36h12))
-    det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12, max_attempts=10)
-    res = det.detect(img)
-
-    # At least one marker found
     assert len(res) >= 1
     assert bool(res) is True
 
-    # __iter__ round-trip
     collected_ids = []
     for mid, corners in res:
         assert type(mid) is int
@@ -210,4 +199,4 @@ def test_integration_real_aruco_len_and_iter():
         collected_ids.append(mid)
 
     assert collected_ids == res.ids.tolist()
-    assert 7 in collected_ids
+    assert _nf._fractal_external_id(cfg) in collected_ids

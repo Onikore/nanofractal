@@ -15,7 +15,14 @@ list(APPEND CMAKE_PREFIX_PATH "${nanobind_ROOT}")
 find_package(nanobind CONFIG REQUIRED)
 
 # OpenCV: system by default. CI (Plan B) overrides via -DOpenCV_DIR=<minimal build>
-find_package(OpenCV REQUIRED COMPONENTS core imgproc calib3d features2d)
+# OpenCV 5 split calib3d (solvePnP/findHomography -> geometry) and renamed
+# features2d -> features; 4.x keeps the old module names.
+find_package(OpenCV REQUIRED COMPONENTS core)
+if(OpenCV_VERSION VERSION_GREATER_EQUAL 5)
+  find_package(OpenCV REQUIRED COMPONENTS core imgproc geometry features)
+else()
+  find_package(OpenCV REQUIRED COMPONENTS core imgproc calib3d features2d)
+endif()
 
 nanobind_add_module(_nanofractal NB_STATIC src/_bindings.cpp)
 

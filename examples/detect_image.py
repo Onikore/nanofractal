@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Detect ArUco markers in an image.
+"""Detect fractal markers in an image.
 
 This script loads an image (from command line or generates a fallback marker),
-detects ArUco markers using nanofractal, and saves the annotated result.
+detects the fractal marker levels using nanofractal, and saves the annotated result.
 
 If opencv-python is available, uses it to load/save images; otherwise generates
 a marker and demonstrates detection with a simple PGM save.
@@ -52,17 +52,17 @@ def main():
 
     # If no image loaded, generate a fallback marker
     if image is None:
-        print("Generating a fallback ArUco marker (id=0, DICT_4X4_50)...")
-        marker = nf.generate_aruco(0, size_px=300, dictionary=nf.Dict.DICT_4X4_50)
+        print("Generating a fallback nested FRACTAL_5L_6 marker...")
+        marker = nf.generate_fractal("FRACTAL_5L_6", size_px=600)
         # Create a white canvas and place the marker in the center
-        canvas_size = 500
+        canvas_size = 800
         image = np.full((canvas_size, canvas_size), 255, dtype=np.uint8)
-        offset = (canvas_size - 300) // 2
-        image[offset : offset + 300, offset : offset + 300] = marker
+        offset = (canvas_size - 600) // 2
+        image[offset : offset + 600, offset : offset + 600] = marker
 
     # Detect markers
     print(f"Detecting markers in image shape {image.shape}...")
-    detector = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
+    detector = nf.FractalDetector("FRACTAL_5L_6")
     result = detector.detect(image)
 
     # Print results

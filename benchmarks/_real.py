@@ -1,7 +1,7 @@
 """benchmarks/_real.py — loader for the real-image slot.
 
 Reads ``benchmarks/real_images/manifest.json`` (if present) and yields
-``(image_bgr, nf_dict, expected_ids)`` tuples for robustness.py.
+``(image_gray, config, expected_ids)`` tuples for robustness.py.
 """
 
 from __future__ import annotations
@@ -12,9 +12,8 @@ from typing import Generator
 
 import numpy as np
 
-import nanofractal as nf
-
 _MANIFEST_NAME = "manifest.json"
+_CONFIGS = {"FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"}
 
 
 def _load_cv2():
@@ -28,8 +27,8 @@ def _load_cv2():
 
 def iter_real_images(
     real_dir: str | Path,
-) -> Generator[tuple[np.ndarray, nf.Dict, list[int]], None, None]:
-    """Yield ``(gray_image, nf_dict, expected_ids)`` from *real_dir/manifest.json*.
+) -> Generator[tuple[np.ndarray, str, list[int]], None, None]:
+    """Yield ``(gray_image, config, expected_ids)`` from *real_dir/manifest.json*.
 
     Silently skips entries whose image file is missing.
     Raises ``FileNotFoundError`` if ``manifest.json`` itself is absent.
@@ -63,12 +62,10 @@ def iter_real_images(
             print(f"  [real] WARNING: could not read: {img_path} — skipping")
             continue
 
-        dict_name: str = entry.get("dictionary", "DICT_4X4_50")
-        try:
-            nf_dict = nf.Dict[dict_name]
-        except KeyError:
-            print(f"  [real] WARNING: unknown dict {dict_name!r} — skipping")
+        config: str = entry.get("config", "FRACTAL_5L_6")
+        if config not in _CONFIGS:
+            print(f"  [real] WARNING: unknown config {config!r} — skipping")
             continue
 
         expected_ids: list[int] = entry.get("expected_ids", [])
-        yield img, nf_dict, expected_ids
+        yield img, config, expected_ids

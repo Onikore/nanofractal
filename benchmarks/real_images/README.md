@@ -1,6 +1,6 @@
 # real_images — real-image evaluation slot
 
-Drop real ArUco images here together with a `manifest.json` to enable the
+Drop real fractal-marker images here together with a `manifest.json` to enable the
 `--real-dir` mode of `robustness.py`.
 
 ## Quick start
@@ -21,8 +21,8 @@ See `manifest.example.json` for the full example.  Each entry is:
 | field           | type            | description                                                  |
 |-----------------|-----------------|--------------------------------------------------------------|
 | `path`          | string          | path relative to `manifest.json` (e.g. `"img_001.png"`)     |
-| `dictionary`    | string          | `nf.Dict` name, e.g. `"DICT_4X4_50"`                        |
-| `expected_ids`  | list of ints    | marker IDs that must be detected for the entry to pass       |
+| `config`        | string          | fractal config, e.g. `"FRACTAL_5L_6"`                        |
+| `expected_ids`  | list of ints    | marker level IDs that must be detected for the entry to pass |
 | `pose`          | object or null  | optional ground-truth pose metadata (not yet consumed)       |
 
 ## Notes

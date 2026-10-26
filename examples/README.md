@@ -5,10 +5,10 @@ This directory contains runnable example scripts demonstrating the nanofractal A
 ## Available Examples
 
 ### `detect_image.py`
-Detect ArUco markers in a single image.
+Detect fractal markers in a single image.
 
 - Loads an image from the command line argument, or generates a fallback marker if not provided.
-- Detects markers using `ArucoDetector.detect()`.
+- Detects every visible marker level using `FractalDetector.detect()`.
 - Draws the detected marker outlines and IDs.
 - Saves the result to `detected.png` (or `detected.pgm` if opencv-python is not installed).
 
@@ -18,23 +18,24 @@ python examples/detect_image.py [image_path]
 ```
 
 ### `pose_estimation.py`
-Estimate the 3D pose of detected ArUco markers.
+Estimate the 3D pose of a fractal marker.
 
-- Detects markers and estimates their 6DoF pose using `ArucoDetector.estimate_pose()`.
-- Prints rotation vectors (rvec), translation vectors (tvec), and reprojection errors.
+- Detects the marker with inner-corner correspondences (`with_inner_points=True`) and
+  estimates its 6DoF pose using `FractalDetector.estimate_pose()`.
+- Prints the rotation vector (rvec), translation vector (tvec), and reprojection error.
 - Draws the detected markers and pose axes if opencv-python is available.
 - Saves the visualization to `pose_estimation.png`.
 
 **Usage:**
 ```bash
-python examples/pose_estimation.py [image_path]
+python examples/pose_estimation.py [image_path] [--config FRACTAL_5L_6] [--size 0.2]
 ```
 
 ### `batch_processing.py`
 Process multiple images using the parallel batch detection API.
 
 - Loads images from a folder (command line argument) or generates synthetic frames.
-- Detects markers in all images in parallel using `ArucoDetector.detect_batch(num_threads=0)`.
+- Detects markers in all images in parallel using `FractalDetector.detect_batch(num_threads=0)`.
 - Prints detection results per frame.
 
 **Usage:**
@@ -46,7 +47,7 @@ python examples/batch_processing.py [image_folder]
 Real-time marker detection from a webcam stream.
 
 - Captures video from the default webcam.
-- Detects and visualizes ArUco markers in real-time.
+- Detects and visualizes fractal markers in real-time.
 - Press 'q' to quit, 's' to save a frame.
 
 **Requires opencv-python:**

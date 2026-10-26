@@ -1,14 +1,14 @@
 [
   {
     "path": "img_001.png",
-    "dictionary": "DICT_4X4_50",
-    "expected_ids": [0, 7],
+    "config": "FRACTAL_5L_6",
+    "expected_ids": [0, 1, 2],
     "pose": null
   },
   {
     "path": "img_002.jpg",
-    "dictionary": "DICT_5X5_100",
-    "expected_ids": [3],
+    "config": "FRACTAL_3L_6",
+    "expected_ids": [0],
     "pose": {
       "rvec": [0.1, -0.05, 0.02],
       "tvec": [0.0, 0.0, 0.5],

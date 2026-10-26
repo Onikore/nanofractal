@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Real-time ArUco marker detection from webcam.
+"""Real-time fractal marker detection from webcam.
 
-This script captures video from the default webcam and detects ArUco markers
+This script captures video from the default webcam and detects fractal markers
 in real-time. Draws the detected markers and their IDs on each frame.
 
 **Requires opencv-python:** `pip install opencv-python`
@@ -39,7 +39,7 @@ def main():
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 480)
 
     print("Creating detector...")
-    detector = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
+    detector = nf.FractalDetector("FRACTAL_5L_6")
 
     print("Starting video stream (press 'q' to quit, 's' to save)...")
     frame_count = 0
@@ -72,7 +72,7 @@ def main():
         )
 
         # Display
-        cv2.imshow("nanofractal - ArUco Detection", annotated)
+        cv2.imshow("nanofractal - Fractal Detection", annotated)
 
         # Handle key presses
         key = cv2.waitKey(1) & 0xFF

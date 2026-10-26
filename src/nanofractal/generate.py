@@ -2,18 +2,10 @@
 
 Public API
 ----------
-generate_aruco(marker_id, size_px=200, dictionary=None, border_bits=1)
-    Render an ArUco marker as a grayscale uint8 image ready for printing.
-
-generate_fractal(config, size_px=400)
-    Render the **external (outermost) fractal marker level** as a grayscale
-    uint8 image.
-
-    IMPORTANT CAVEAT: this function renders only the external / outermost
-    marker ring that ``FractalDetector`` actually detects. It is NOT the full
-    multi-level nested fractal composite image (which would require additional
-    library support to compose all levels together). If you need a printable
-    nested composite, you must assemble the inner levels separately.
+generate_fractal(config, size_px=400, nested=True)
+    Render a fractal marker as a grayscale uint8 image. By default every
+    nested level is composited (a printable marker); ``nested=False`` renders
+    only the external (outermost) level.
 """
 
 from __future__ import annotations
@@ -29,18 +21,6 @@ def _nn_upscale(grid: np.ndarray, size_px: int) -> np.ndarray:
     """Nearest-neighbour upscale a (total x total) cell grid to (size_px x size_px).
 
     Pure-numpy implementation: no cv2 dependency.
-
-    Parameters
-    ----------
-    grid : np.ndarray
-        2-D uint8 array of shape (total, total).
-    size_px : int
-        Target output dimension (square).
-
-    Returns
-    -------
-    np.ndarray
-        Contiguous uint8 array of shape (size_px, size_px).
     """
     total = grid.shape[0]
     # Map each output pixel to the nearest source cell via integer floor.
@@ -53,86 +33,42 @@ def _nn_upscale(grid: np.ndarray, size_px: int) -> np.ndarray:
     return np.ascontiguousarray(out, dtype=np.uint8)
 
 
-def generate_aruco(
-    marker_id: int,
-    size_px: int = 200,
-    dictionary=None,
-    border_bits: int = 1,
-) -> np.ndarray:
-    """Render an ArUco marker as a square grayscale image.
+def _render_nested(config: str, size_px: int) -> np.ndarray:
+    """Composite every marker level of *config* into one (size_px, size_px) image.
 
-    Parameters
-    ----------
-    marker_id : int
-        Index of the marker within *dictionary*.
-    size_px : int
-        Side length of the returned image in pixels (default 200).
-    dictionary : Dict or int, optional
-        ArUco dictionary to use.  Defaults to ``Dict.ARUCO_MIP_36h12`` when
-        ``None``.  Accepts either a ``Dict`` enum member or a plain ``int``.
-    border_bits : int
-        Width of the black quiet-zone border in marker cells (default 1).
-        Minimum value is 1.
-
-    Returns
-    -------
-    np.ndarray
-        ``uint8`` array of shape ``(size_px, size_px)``.  Values are 0
-        (black) or 255 (white).  The image is C-contiguous.
-
-    Raises
-    ------
-    ValueError
-        If ``size_px <= 0``, ``border_bits < 1``, or the
-        ``marker_id`` / ``dictionary`` combination is invalid (propagated from
-        the C++ helper).
+    Each level is a black-bordered bit grid placed at its normalized corners
+    ([-1, 1], y up). Levels are painted largest first, so each submarker
+    overwrites the masked-out region of its parent. Pixels are sampled at their
+    centres (nearest cell), so cell edges are exact at any size.
     """
-    if size_px <= 0:
-        raise ValueError(f"size_px must be > 0, got {size_px!r}")
-    if border_bits < 1:
-        raise ValueError(f"border_bits must be >= 1, got {border_bits!r}")
-
-    # Lazy import avoids a circular-import cycle: __init__ imports us, and we
-    # would normally need Dict from __init__.  Using a sentinel + lazy import
-    # sidesteps this.
-    if dictionary is None:
-        from . import Dict
-
-        dictionary = Dict.ARUCO_MIP_36h12
-
-    # _aruco_marker_image8 raises ValueError for unknown dict / out-of-range id.
-    grid = np.asarray(_nf._aruco_marker_image8(int(dictionary), int(marker_id)))
-    # grid is (gsize x gsize); gsize includes a 1-cell black border already.
-    gsize = grid.shape[0]  # noqa: F841
-
-    # Extract the inner bit block (strip the 1-cell border the C++ added).
-    inner = grid[1:-1, 1:-1]  # shape (N, N), N = gsize - 2
-    N = inner.shape[0]
-
-    # Rebuild with the requested border width.
-    total = N + 2 * border_bits
-    full = np.zeros((total, total), dtype=np.uint8)  # black background
-    full[border_bits : border_bits + N, border_bits : border_bits + N] = inner
-
-    return _nn_upscale(full, size_px)
+    markers = _nf._fractal_markers(config)
+    # largest first: children overwrite the parent's masked region
+    markers = sorted(markers, key=lambda m: -(np.ptp(np.asarray(m[1])[:, 0])))
+    img = np.full((size_px, size_px), 255, dtype=np.uint8)
+    # pixel centres in normalized coords: x right, y up
+    centres = (np.arange(size_px, dtype=np.float64) + 0.5) / size_px * 2.0 - 1.0
+    xs = centres
+    ys = -centres
+    for _id, corners, bits in markers:
+        c = np.asarray(corners, dtype=np.float64)
+        bits = np.asarray(bits)
+        x0, x1 = c[:, 0].min(), c[:, 0].max()
+        y0, y1 = c[:, 1].min(), c[:, 1].max()
+        n = bits.shape[0] + 2  # cells per side incl. the black border
+        cols = np.nonzero((xs >= x0) & (xs < x1))[0]
+        rows = np.nonzero((ys > y0) & (ys <= y1))[0]
+        if cols.size == 0 or rows.size == 0:
+            continue
+        cx = np.minimum(((xs[cols] - x0) / (x1 - x0) * n).astype(np.intp), n - 1)
+        cy = np.minimum(((y1 - ys[rows]) / (y1 - y0) * n).astype(np.intp), n - 1)
+        grid = np.zeros((n, n), dtype=np.uint8)
+        grid[1:-1, 1:-1] = np.where(bits > 0, 255, 0)
+        img[np.ix_(rows, cols)] = grid[np.ix_(cy, cx)]
+    return np.ascontiguousarray(img)
 
 
-def generate_fractal(config: str, size_px: int = 400) -> np.ndarray:
-    """Render the external (outermost) fractal marker level as a grayscale image.
-
-    This renders the single outermost marker ring that ``FractalDetector``
-    detects.
-
-    .. important::
-
-        This function renders **only the external / outermost marker level**
-        — i.e. the ArUco-style ring that ``FractalDetector.detect()``
-        locates.  It does **not** produce the full multi-level nested fractal
-        composite image (which requires compositing all inner levels on top of
-        the outer one — additional support not currently in this library).
-        Use this image to verify detector round-trips; for a printable
-        production target you will need the full composite from the original
-        ``fractal_marker_generator`` tool.
+def generate_fractal(config: str, size_px: int = 400, nested: bool = True) -> np.ndarray:
+    """Render a fractal marker as a square grayscale image.
 
     Parameters
     ----------
@@ -141,12 +77,19 @@ def generate_fractal(config: str, size_px: int = 400) -> np.ndarray:
         ``"FRACTAL_2L_6"``, ``"FRACTAL_3L_6"``, ``"FRACTAL_4L_6"``,
         ``"FRACTAL_5L_6"``.
     size_px : int
-        Side length of the returned image in pixels (default 400).
+        Side length of the returned image in pixels (default 400). For a
+        crisp print choose a multiple of the smallest level's cell count.
+    nested : bool
+        ``True`` (default) composites every nested level — the full,
+        printable fractal marker. ``False`` renders only the external
+        (outermost) level.
 
     Returns
     -------
     np.ndarray
-        ``uint8`` array of shape ``(size_px, size_px)``.  C-contiguous.
+        ``uint8`` array of shape ``(size_px, size_px)``, values 0/255,
+        C-contiguous. The image spans the marker's outer black border exactly
+        (add your own white quiet zone around it).
 
     Raises
     ------
@@ -161,5 +104,7 @@ def generate_fractal(config: str, size_px: int = 400) -> np.ndarray:
     if size_px <= 0:
         raise ValueError(f"size_px must be > 0, got {size_px!r}")
 
+    if nested:
+        return _render_nested(config, int(size_px))
     grid = np.asarray(_nf._fractal_external_image8(config))
     return _nn_upscale(grid, size_px)
