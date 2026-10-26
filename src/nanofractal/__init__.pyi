@@ -108,6 +108,10 @@ def generate_fractal(
     nested: bool = ...,
 ) -> npt.NDArray[np.uint8]: ...
 
+# ── threading ────────────────────────────────────────────────────────────────
+def set_num_threads(n: int) -> None: ...
+def get_num_threads() -> int: ...
+
 # ── B2: sub-pixel corner refinement ──────────────────────────────────────────
 def refine_corners(
     image: npt.NDArray[np.uint8],
@@ -123,4 +127,6 @@ __all__ = [
     "PoseSmoother",
     "generate_fractal",
     "refine_corners",
+    "set_num_threads",
+    "get_num_threads",
 ]

@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 import nanofractal as nf
 import nanofractal._nanofractal as _nf

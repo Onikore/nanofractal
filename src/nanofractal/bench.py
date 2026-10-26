@@ -160,8 +160,12 @@ def generate_scene(
             cx, cy = width * 0.5, height * 0.5
             half = m.shape[0] / 2
             quad = np.array(
-                [[cx - half, cy - half], [cx + half, cy - half], [cx + half, cy + half],
-                 [cx - half, cy + half]]
+                [
+                    [cx - half, cy - half],
+                    [cx + half, cy - half],
+                    [cx + half, cy + half],
+                    [cx - half, cy + half],
+                ]
             )
             quad += rng.uniform(-0.12, 0.12, (4, 2)) * m.shape[0]
             _warp_onto(img, m, quad)
@@ -243,8 +247,12 @@ def main(argv: list[str] | None = None) -> None:
     )
     parser.add_argument("--resolution", type=str, default="1280x720", help="frame size WxH")
     parser.add_argument("--scene", choices=SCENES, default="perspective")
-    parser.add_argument("--mode", choices=MODES, default="detect",
-                        help="detect | inner (with_inner_points) | scale05 (detection_scale=0.5)")
+    parser.add_argument(
+        "--mode",
+        choices=MODES,
+        default="detect",
+        help="detect | inner (with_inner_points) | scale05 (detection_scale=0.5)",
+    )
     parser.add_argument("--config", default="FRACTAL_5L_6")
     parser.add_argument("--frames", type=int, default=200, help="timed iterations")
     args = parser.parse_args(argv)

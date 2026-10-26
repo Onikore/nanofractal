@@ -70,12 +70,17 @@ def time_cell(det, frame, mode, min_time=1.0, min_iters=15, max_iters=2000):
 
 
 def cmd_run(args):
+    if hasattr(nf, "set_num_threads"):  # (absent in old builds benchmarked for comparison)
+        nf.set_num_threads(args.threads)
     rows = []
     prev = {}
     if args.vs:
         with open(args.vs) as fh:
             prev = {r["key"]: r for r in json.load(fh)["rows"]}
-    print(f"nanofractal {nf.__version__}  OpenCV {nf._opencv_version()}  {platform.machine()}")
+    print(
+        f"nanofractal {nf.__version__}  OpenCV {nf._opencv_version()}  {platform.machine()}"
+        f"  threads/detect={nf.get_num_threads() if hasattr(nf, 'get_num_threads') else '?'}"
+    )
     hdr = f"{'cell':34s} {'median ms':>10s} {'min ms':>9s} {'iters':>6s}  found"
     if prev:
         hdr += "      vs base"
@@ -182,6 +187,12 @@ def main():
             p.add_argument("--vs", help="previous --json to print speedups against")
             p.add_argument("--min-time", type=float, default=1.0)
             p.add_argument("--batch", action="store_true")
+            p.add_argument(
+                "--threads",
+                type=int,
+                default=0,
+                help="threads per detect() (nf.set_num_threads); 0 = all cores",
+            )
         elif name == "dump":
             p.add_argument("--out", required=True)
         else:

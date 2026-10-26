@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import json
 from pathlib import Path
 from typing import Any
@@ -23,12 +24,7 @@ import numpy as np
 import nanofractal as nf
 from nanofractal.bench import _blur, _warp_onto
 
-try:
-    import cv2
-
-    _HAS_CV2 = True
-except ImportError:
-    _HAS_CV2 = False
+_HAS_CV2 = importlib.util.find_spec("cv2") is not None  # real-image loader needs it
 
 _CONFIG = "FRACTAL_5L_6"
 _CANVAS = 1280
@@ -50,8 +46,9 @@ def _scene(marker_px: int = _MARKER_PX, quad_jitter: np.ndarray | None = None) -
     canvas = np.full((_CANVAS, _CANVAS), 255.0)
     half = m.shape[0] / 2
     c = _CANVAS / 2
-    quad = np.array([[c - half, c - half], [c + half, c - half], [c + half, c + half],
-                     [c - half, c + half]])
+    quad = np.array(
+        [[c - half, c - half], [c + half, c - half], [c + half, c + half], [c - half, c + half]]
+    )
     if quad_jitter is not None:
         quad = quad + quad_jitter
     _warp_onto(canvas, m, quad)
@@ -120,7 +117,9 @@ def _tilted_jitter(deg: float) -> np.ndarray:
 def sweep_perspective() -> list[dict]:
     rows = []
     for deg in [0, 15, 30, 45, 60]:
-        rows.append({"tilt_deg": deg, **_evaluate(_finish(_scene(quad_jitter=_tilted_jitter(deg))))})
+        rows.append(
+            {"tilt_deg": deg, **_evaluate(_finish(_scene(quad_jitter=_tilted_jitter(deg))))}
+        )
     _print_table("Perspective sweep (marker tilted about the x axis)", rows)
     return rows
 
@@ -158,8 +157,11 @@ def run_real_images(real_dir: str | Path) -> list[dict]:
             correct = all(eid in detected for eid in expected_ids)
             correct_count += int(correct)
             rows.append(
-                {"expected": str(expected_ids), "detected": str(detected),
-                 "correct": "YES" if correct else "NO"}
+                {
+                    "expected": str(expected_ids),
+                    "detected": str(detected),
+                    "correct": "YES" if correct else "NO",
+                }
             )
     except FileNotFoundError as exc:
         print(f"\n[real-images] {exc}")
@@ -173,8 +175,12 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Measure fractal detection robustness under synthetic degradations."
     )
-    parser.add_argument("--real-dir", metavar="DIR", default=None,
-                        help="Run real-image evaluation from DIR (needs DIR/manifest.json).")
+    parser.add_argument(
+        "--real-dir",
+        metavar="DIR",
+        default=None,
+        help="Run real-image evaluation from DIR (needs DIR/manifest.json).",
+    )
     parser.add_argument("--json", metavar="PATH", help="Write JSON results to PATH")
     args = parser.parse_args()
 

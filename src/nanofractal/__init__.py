@@ -18,6 +18,21 @@ _opencv_version = _nf._opencv_version
 DetectorParams = _nf.DetectorParams
 
 
+def set_num_threads(n: int) -> None:
+    """Set how many threads a single ``detect()`` call may use.
+
+    ``n >= 1`` caps the intra-frame parallelism (``1`` = fully sequential);
+    ``n <= 0`` restores the default, all cores. ``detect_batch`` parallelises
+    across frames instead and is unaffected. Process-wide setting.
+    """
+    _nf.set_num_threads(int(n))
+
+
+def get_num_threads() -> int:
+    """Number of threads a single ``detect()`` call may use."""
+    return int(_nf.get_num_threads())
+
+
 _ALLOWED_D_LENGTHS = frozenset({4, 5, 8, 12, 14})
 
 
@@ -374,4 +389,6 @@ __all__ = [
     "generate_fractal",
     "PoseSmoother",
     "refine_corners",
+    "set_num_threads",
+    "get_num_threads",
 ]

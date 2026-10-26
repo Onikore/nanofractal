@@ -264,3 +264,38 @@ def test_fractal_repr_marker_size():
     det = nf.FractalDetector("FRACTAL_3L_6", marker_size=1.2)
     r = repr(det)
     assert "1.2" in r
+
+
+# ---------------------------------------------------------------------------
+# threads per detect() and post-construction params changes
+# ---------------------------------------------------------------------------
+
+
+def test_set_num_threads_roundtrip_and_same_result():
+    from nanofractal.bench import generate_scene
+
+    frame = generate_scene(1280, 720, "perspective")
+    det = nf.FractalDetector(CONFIG)
+    default = nf.get_num_threads()
+    try:
+        nf.set_num_threads(1)
+        assert nf.get_num_threads() == 1
+        one = det.detect(frame, with_inner_points=True)
+        nf.set_num_threads(0)
+        assert nf.get_num_threads() == default
+        many = det.detect(frame, with_inner_points=True)
+    finally:
+        nf.set_num_threads(0)
+    assert one.ids.tolist() == many.ids.tolist()
+    np.testing.assert_array_equal(one.corners, many.corners)
+    np.testing.assert_array_equal(one.points_2d, many.points_2d)
+
+
+def test_params_changed_after_construction_take_effect():
+    from nanofractal.bench import generate_scene
+
+    frame = generate_scene(1280, 720, "clean")
+    det = nf.FractalDetector(CONFIG)
+    assert len(det.detect(frame)) > 0
+    det.params.min_contour_size = 100000  # nothing is that long
+    assert len(det.detect(frame)) == 0

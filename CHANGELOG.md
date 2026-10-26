@@ -5,6 +5,39 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-10-26
+
+### Removed (breaking)
+- The ArUco detector and everything around it: `ArucoDetector`, `Dict`,
+  `generate_aruco`, `dict_grid_size`, `dict_num_markers`, `to_opencv`,
+  `from_opencv`, and `benchmarks/compare_opencv.py`. nanofractal is now a
+  fractal-marker library.
+
+### Added
+- Optimised detection pipeline (`src/fractal_fast.hpp`): fused adaptive
+  threshold, SIMD-assisted contour tracing, exact `approxPolyDP` replica,
+  parallel decoding. Outer corners are bit-identical to the reference detector;
+  2–2.4× faster on one core and 3–3.5× with all cores at 1080p / 4K.
+- `set_num_threads(n)` / `get_num_threads()` — threads per `detect()` call.
+- `generate_fractal(..., nested=True)` renders the full nested marker
+  (previously only the external level).
+- OpenCV 5 support (OpenCV 4 keeps working).
+- `benchmarks/fractal_bench.py` (latency matrix, dump/compare of detections),
+  deterministic benchmark scenes in `nanofractal.bench`, and
+  `tests/test_reference_equivalence.py`.
+
+### Changed
+- `with_inner_points=True` runs FAST only around the marker; the keypoint
+  response threshold is now taken from the marker's neighbourhood.
+- `robustness.py` measures per-level detection, inner points and pose error.
+- Builds no longer use `-ffast-math`.
+
+### Fixed
+- Level 3 of `FRACTAL_5L_6` was never detected in `-ffast-math` builds (the CI
+  wheels) because the submarker mask extent was truncated instead of rounded.
+- `DetectorParams` changed after constructing a `FractalDetector` were
+  validated but never used by detection.
+
 ## [0.5.0] - 2026-06-20
 
 ### Added

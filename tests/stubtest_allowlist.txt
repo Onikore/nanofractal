@@ -28,3 +28,5 @@ nanofractal\._nanofractal\._fractal_external_id
 nanofractal\._nanofractal\._fractal_external_image8
 nanofractal\._nanofractal\._opencv_version
 nanofractal\._opencv_version
+nanofractal\._nanofractal\.set_num_threads
+nanofractal\._nanofractal\.get_num_threads

@@ -39,34 +39,35 @@ target_compile_options(_nanofractal PRIVATE
 # ---------------------------------------------------------------------------
 # Architecture & FP tuning (GCC / Clang only; MSVC is skipped silently).
 #
-#   -DNF_NATIVE=ON          local dev: -march=native -ffast-math
-#   -DNF_MARCH=x86-64-v3   portable:  -march=<isa>  -ffast-math (CI wheels)
+#   -DNF_NATIVE=ON          local dev: -march=native
+#   -DNF_MARCH=x86-64-v3   portable:  -march=<isa>  (CI wheels)
 #
 # x86-64-v3 = AVX2 + FMA + BMI1/2 (Haswell 2013+).  Enables auto-vectorisation
 # of inner pixel loops without breaking pre-Skylake CPUs in the wild.
-# ffast-math: allows fp-reassociation and removes errno overhead; safe for
-# this library (no signalling NaNs produced, no errno-dependent callers).
+# No -ffast-math: the detector reproduces OpenCV's float rounding bit for bit,
+# and fast-math reciprocal division already broke one marker level once
+# (see PATCHES.md). The hot paths are integer/SIMD code that gains nothing from it.
 #
 # aarch64 / arm64: NEON is mandatory in the ARMv8-A base ISA, so GCC/Clang
 # already enable it by default.  We add -ftree-vectorize to encourage the
 # auto-vectorizer and skip -march=native / NF_MARCH entirely (the x86 ISA
 # string is invalid on ARM and would cause a hard build failure).
 # ---------------------------------------------------------------------------
-option(NF_NATIVE "Enable -march=native -ffast-math (local dev only; not for distributed wheels)" OFF)
+option(NF_NATIVE "Enable -march=native (local dev only; not for distributed wheels)" OFF)
 set(NF_MARCH "" CACHE STRING "ISA baseline passed to -march= (e.g. x86-64-v3). Used in CI wheels.")
 
 if(NOT MSVC)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|armv8")
     # ARM / aarch64 path: rely on the compiler's default ARMv8-A target
     # (NEON always available).  Do NOT apply NF_MARCH — an x86 ISA string
-    # would break the build.  -ffast-math is also safe here.
-    target_compile_options(_nanofractal PRIVATE -O3 -ftree-vectorize -ffast-math)
+    # would break the build.
+    target_compile_options(_nanofractal PRIVATE -O3 -ftree-vectorize)
   else()
     # x86 / x86_64 path: honour NF_NATIVE or NF_MARCH as before.
     if(NF_NATIVE)
-      target_compile_options(_nanofractal PRIVATE -march=native -ffast-math)
+      target_compile_options(_nanofractal PRIVATE -march=native)
     elseif(NF_MARCH)
-      target_compile_options(_nanofractal PRIVATE -march=${NF_MARCH} -ffast-math)
+      target_compile_options(_nanofractal PRIVATE -march=${NF_MARCH})
     endif()
   endif()
 endif()

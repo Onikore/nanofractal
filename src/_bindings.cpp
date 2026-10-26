@@ -15,7 +15,7 @@
 #else
 #include <opencv2/calib3d.hpp> // solvePnP, projectPoints, cv::fisheye
 #endif
-#include <opencv2/imgproc.hpp>    // cornerSubPix, cvtColor
+#include <opencv2/imgproc.hpp> // cornerSubPix, cvtColor
 #include <string>
 #include <thread>
 
@@ -50,18 +50,20 @@ static void draw_outlines_ids(cv::Mat &im, const F32Arr &corners,
 }
 
 // ---- Fractal ----
-// FastFractalDetector keeps per-frame scratch buffers, so it is NOT safe to call
-// concurrently on one instance. We keep a pool of independent detectors (one per
-// worker thread); detect()/detect_full() and detect_batch's thread 0 all use
-// pool[0] -- concurrent calls on the same Python object are serialized by the
-// GIL. The fractal config is expensive to build, so it is constructed once per
-// pooled detector. `params` is copied into a pooled detector before every call,
-// so changes made after construction take effect on the next detection.
+// FastFractalDetector keeps per-frame scratch buffers, so it is NOT safe to
+// call concurrently on one instance. We keep a pool of independent detectors
+// (one per worker thread); detect()/detect_full() and detect_batch's thread 0
+// all use pool[0] -- concurrent calls on the same Python object are serialized
+// by the GIL. The fractal config is expensive to build, so it is constructed
+// once per pooled detector. `params` is copied into a pooled detector before
+// every call, so changes made after construction take effect on the next
+// detection.
 using nanofractal_fast::Detection;
 using nanofractal_fast::FastFractalDetector;
 
-static void fill(const std::vector<Detection> &markers, std::vector<int32_t> &ids,
-                 std::vector<float> &corners, float ox = 0.f, float oy = 0.f) {
+static void fill(const std::vector<Detection> &markers,
+                 std::vector<int32_t> &ids, std::vector<float> &corners,
+                 float ox = 0.f, float oy = 0.f) {
   size_t n = markers.size();
   ids.resize(n);
   corners.resize(n * 8);
@@ -74,9 +76,11 @@ static void fill(const std::vector<Detection> &markers, std::vector<int32_t> &id
   }
 }
 
-static nb::tuple full_result(std::vector<int32_t> &&ids, std::vector<float> &&corners,
+static nb::tuple full_result(std::vector<int32_t> &&ids,
+                             std::vector<float> &&corners,
                              const std::vector<cv::Point2f> &p2d,
-                             const std::vector<cv::Point3f> &p3d, float ox, float oy) {
+                             const std::vector<cv::Point3f> &p3d, float ox,
+                             float oy) {
   size_t n = ids.size();
   size_t m2 = p2d.size();
   std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
@@ -113,7 +117,8 @@ struct FractalDetectorImpl {
   FractalDetectorImpl &operator=(FractalDetectorImpl &&) = default;
 
   std::unique_ptr<FastFractalDetector> make_detector() const {
-    return std::make_unique<FastFractalDetector>(config, marker_size > 0 ? marker_size : -1.f);
+    return std::make_unique<FastFractalDetector>(
+        config, marker_size > 0 ? marker_size : -1.f);
   }
 
   FastFractalDetector &detector(size_t t) {
@@ -135,7 +140,8 @@ struct FractalDetectorImpl {
     std::vector<int32_t> ids;
     std::vector<float> corners;
     // Offset corners to full-image coordinates when an ROI was used.
-    fill(markers, ids, corners, has_roi ? (float)rx : 0.f, has_roi ? (float)ry : 0.f);
+    fill(markers, ids, corners, has_roi ? (float)rx : 0.f,
+         has_roi ? (float)ry : 0.f);
     size_t n = ids.size();
     return nb::make_tuple(ids_to_numpy(std::move(ids)),
                           corners_to_numpy(std::move(corners), n));
@@ -354,6 +360,13 @@ NB_MODULE(_nanofractal, m) {
   m.def("_opencv_version",
         []() { return std::string(cv::getVersionString()); });
 
+  // Threads used inside one detect() call (OpenCV's parallel_for_ pool):
+  // n >= 1 caps it, n <= 0 restores the default (all cores).
+  m.def(
+      "set_num_threads", [](int n) { cv::setNumThreads(n >= 1 ? n : -1); },
+      nb::arg("n"));
+  m.def("get_num_threads", []() { return cv::getNumThreads(); });
+
   m.def("_img_info", [](RawArray arr) {
     cv::Mat im = as_mat(arr);
     return nb::make_tuple(im.rows, im.cols, im.channels());
@@ -391,9 +404,8 @@ NB_MODULE(_nanofractal, m) {
               "contour approx epsilon = perimeter * rate (default 0.05)")
       .def_rw("subpix_win_size", &DetectorParams::subpix_win_size,
               "corner sub-pixel half-window (-1 = default 4, 0 = off)")
-      .def_rw(
-          "kfilter_min_dist", &DetectorParams::kfilter_min_dist,
-          "min distance (px) between FAST keypoints (default 10)")
+      .def_rw("kfilter_min_dist", &DetectorParams::kfilter_min_dist,
+              "min distance (px) between FAST keypoints (default 10)")
       .def_rw("detection_scale", &DetectorParams::detection_scale,
               "downscale factor for the detection stage "
               "(1.0 = full res; 0.5 ~= 4x faster; corners refined at full res)")
@@ -490,7 +502,8 @@ NB_MODULE(_nanofractal, m) {
         std::vector<int32_t> ids;
         std::vector<float> corners;
         fill(det, ids, corners);
-        return full_result(std::move(ids), std::move(corners), p2d, p3d, 0.f, 0.f);
+        return full_result(std::move(ids), std::move(corners), p2d, p3d, 0.f,
+                           0.f);
       },
       nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
       nb::arg("image"), nb::arg("inner"));

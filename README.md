@@ -2,30 +2,53 @@
 
 [![codecov](https://codecov.io/gh/Onikore/nanofractal/branch/main/graph/badge.svg)](https://codecov.io/gh/Onikore/nanofractal)
 
-High-performance fiducial-marker detection for Python. `nanofractal` wraps two
-compact, header-only C++ detectors with [nanobind](https://github.com/wjakob/nanobind):
+Fast **fractal fiducial-marker** detection for Python. Fractal markers are
+nested square markers: they stay detectable under heavy occlusion and over a
+wide range of distances, and every visible level contributes corner
+correspondences for accurate pose.
 
-- **ArUco Nano v6** — square markers: all standard OpenCV ArUco dictionaries
-  (4×4, 5×5, 6×6, 7×7) plus `ARUCO_MIP_36h12` and AprilTag `36h11`.
-- **Fractal markers** — nested markers that stay detectable under heavy occlusion
-  and expose many inner corner correspondences for accurate, long-range pose.
+`nanofractal` wraps an optimised C++ pipeline with [nanobind](https://github.com/wjakob/nanobind):
+**zero-copy** NumPy ↔ `cv::Mat`, the **GIL is released** during detection,
+**multi-threaded** single-frame detection, and a **parallel batch** API.
 
-It is built for speed: **zero-copy** NumPy ↔ `cv::Mat`, the **GIL is released**
-during detection, and a **parallel batch** API scales across cores.
+Since 0.6 the library is fractal-only (the ArUco detector was removed).
 
-Performance depends heavily on hardware, resolution, and marker density. Run the
-included benchmarks on your own machine to get numbers that actually apply to
-your setup:
+---
+
+## Performance
+
+The hot path (adaptive threshold, contour tracing, polygon fitting, decoding)
+is a purpose-built reimplementation that returns **bit-identical outer
+corners** to the reference detector (checked by the test-suite against
+`_reference_detect`). Median latency per frame, `FRACTAL_5L_6`, synthetic
+scenes from `nanofractal.bench`, i5-12400 (6P+0E, 12 threads), OpenCV 5.0,
+`NF_MARCH=x86-64-v3`:
+
+| scene / mode | res | 0.5 (1 core) | 0.6 (1 core) | 0.5 (all cores) | 0.6 (all cores) |
+|---|---|---:|---:|---:|---:|
+| marker in clutter, `detect` | 1080p | 6.41 ms | 3.17 ms | 4.76 ms | **1.52 ms** |
+| marker in clutter, `with_inner_points` | 1080p | 8.40 ms | 4.00 ms | 7.12 ms | **2.71 ms** |
+| no marker (clutter only) | 1080p | 6.47 ms | 2.71 ms | 4.48 ms | **1.30 ms** |
+| marker in clutter, `detect` | 4K | 23.1 ms | 12.2 ms | 16.1 ms | **6.28 ms** |
+| marker in clutter, `with_inner_points` | 4K | 28.8 ms | 14.5 ms | 22.6 ms | **9.05 ms** |
+| no marker (clutter only) | 4K | 24.1 ms | 11.9 ms | 16.8 ms | **6.04 ms** |
+| `detect_batch`, 48 × 1080p, all cores | — | — | — | 882 fps | **1379 fps** |
+
+Reproduce on your machine:
 
 ```bash
-python -m nanofractal.bench                # single-frame latency, aruco + fractal
-python benchmarks/compare_opencv.py        # nanofractal vs cv2.aruco head-to-head
+python -m nanofractal.bench --resolution 1920x1080 --scene perspective
+python benchmarks/fractal_bench.py run --resolutions 1920x1080 3840x2160 --batch
 ```
 
-Key levers: **`detection_scale`** downsamples the threshold/contour stage
-(corners are still refined at full resolution), giving a large speedup on
-high-res frames. **`detect_batch`** parallelises across cores via a C++
-thread pool, scaling throughput roughly with available threads.
+Levers:
+
+- **`nf.set_num_threads(n)`** — threads used inside one `detect()` call
+  (default: all cores; `1` = sequential, best for many concurrent detectors).
+- **`params.detection_scale`** — runs the threshold/contour stage on a
+  downscaled frame (corners are still refined at full resolution); `0.5` is
+  roughly 3–4× faster at 4K.
+- **`detect_batch`** — parallelises across frames for offline throughput.
 
 ---
 
@@ -35,455 +58,144 @@ thread pool, scaling throughput roughly with available threads.
 pip install nanofractal
 ```
 
-Wheels are available for x86_64 and aarch64 Linux (manylinux). They bundle a
+Wheels are available for Linux x86_64/aarch64 and Windows AMD64. They bundle a
 minimal OpenCV, so no system OpenCV is required at runtime.
 
 ### Build from source
 
-You need a C++17 compiler, CMake ≥ 3.18 and a development OpenCV
-(`core`, `imgproc`, `calib3d`, `features2d`):
+You need a C++17 compiler, CMake ≥ 3.18 and a development OpenCV — 4.x
+(`core`, `imgproc`, `calib3d`, `features2d`) or 5.x (`core`, `imgproc`,
+`geometry`, `features`):
 
 ```bash
-# Debian/Ubuntu
-sudo apt-get install -y build-essential cmake libopencv-dev
-
+sudo apt-get install -y build-essential cmake libopencv-dev   # Debian/Ubuntu
 pip install .
-```
-
-#### Local dev build with CPU tuning
-
-```bash
-# Enable -march=native + -ffast-math for maximum local performance:
-NF_NATIVE=1 pip install -e . --no-build-isolation
+NF_MARCH=x86-64-v3 pip install .     # AVX2 build (what the x86_64 wheels use)
 ```
 
 ---
 
 ## Quick start
 
-Inputs are plain NumPy `uint8` arrays — either `(H, W)` grayscale, `(H, W, 1)`
-grayscale, or `(H, W, 3)` BGR, and **C-contiguous** (use `np.ascontiguousarray`
-if unsure). Any image loader works; the examples use OpenCV.
+Inputs are plain NumPy `uint8` arrays — `(H, W)` / `(H, W, 1)` grayscale or
+`(H, W, 3)` BGR, **C-contiguous**.
 
-### Generate ArUco markers
+### Generate a marker
 
 ```python
 import nanofractal as nf
 
-# Generate a single 4×4 marker (id=7, 200×200 pixels, grayscale uint8)
-marker = nf.generate_aruco(marker_id=7, size_px=200,
-                           dictionary=nf.Dict.DICT_4X4_50, border_bits=1)
-
-# Generate the external level of a fractal marker
-config = "FRACTAL_5L_6"
-fractal = nf.generate_fractal(config, size_px=400)  # uint8 grayscale
+marker = nf.generate_fractal("FRACTAL_5L_6", size_px=1200)   # every nested level
+outer = nf.generate_fractal("FRACTAL_5L_6", size_px=1200, nested=False)  # external level only
 ```
 
-### Detect ArUco markers
+The image spans the marker's black border exactly; leave a white quiet zone
+around it when printing. Configs: `FRACTAL_2L_6`, `FRACTAL_3L_6`,
+`FRACTAL_4L_6`, `FRACTAL_5L_6` (number of nested levels).
+
+### Detect
 
 ```python
 import cv2
 import nanofractal as nf
 
 image = cv2.imread("scene.png")                  # (H, W, 3) uint8 BGR
-
-# Standard 4×4 dictionary (50 unique markers)
-det = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
-
-# Or the legacy / AprilTag dictionaries:
-# det = nf.ArucoDetector(nf.Dict.ARUCO_MIP_36h12)
-# det = nf.ArucoDetector(nf.Dict.APRILTAG_36h11)
+det = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.2)  # side in metres
 
 res = det.detect(image)
-print(len(res))        # number of detected markers
-print(res.ids)         # int32   (N,)       e.g. [ 7 42]
-print(res.corners)     # float32 (N, 4, 2)  clockwise corners, subpixel
-
-# Iterate over results
-for marker_id, corners in res:
-    print(f"Marker {marker_id}: {corners}")
+print(res.ids)       # int32 (N,)      — one entry per visible marker level
+print(res.corners)   # float32 (N,4,2) — outer corners, sub-pixel
+for level_id, corners in res:
+    ...
 ```
 
-### Tune detection parameters
+### Pose (occlusion-robust)
+
+`estimate_pose` returns `(rvec, tvec, reproj_err)` or `None`. It uses every
+visible inner **and** outer corner correspondence when available and falls back
+to the four outer corners otherwise; `reproj_err` (RMS px) lets you gate noisy
+poses.
 
 ```python
-params = nf.DetectorParams()
-params.min_contour_size    = 30    # detect smaller markers (default: 50)
-params.adaptive_block_size = 11    # adaptive threshold window (must be odd, ≥3)
-params.adaptive_c          = 7.0   # threshold constant (default: 7)
-params.approx_poly_rate    = 0.05  # polygon approx rate (default: 0.05)
-
-det = nf.ArucoDetector(nf.Dict.DICT_5X5_100, params=params)
-
-# Or change params after creation:
-det.params.min_contour_size = 80
-```
-
-For high-resolution input with reasonably large markers, `detection_scale` is the
-single biggest speed lever — the dominant cost (`adaptiveThreshold` + `findContours`)
-is already SIMD-optimized inside OpenCV, so the win comes from feeding it fewer
-pixels. Corners are still refined at full resolution, and it works for **both**
-`ArucoDetector` and `FractalDetector`:
-
-```python
-params = nf.DetectorParams()
-params.detection_scale = 0.5   # ~4x faster threshold/contour stage @1080p
-
-det  = nf.ArucoDetector(nf.Dict.DICT_4X4_50, params=params)
-fdet = nf.FractalDetector("FRACTAL_5L_6", params=params)
-```
-
-FractalDetector also supports all the same parameters plus two extras:
-
-```python
-fparams = nf.DetectorParams()
-fparams.subpix_win_size  = 4    # corner sub-pixel half-window (0 = off)
-fparams.kfilter_min_dist = 10.0 # min pixel distance between FAST keypoints
-```
-
-### Estimate pose
-
-`estimate_pose` runs `solvePnP` (IPPE_SQUARE) for every detected marker at once.
-
-```python
-import numpy as np
-
-camera_matrix = np.array([[600, 0, 320],
-                          [0, 600, 240],
-                          [0,   0,   1]], dtype=np.float64)
-dist_coeffs = np.zeros(5, dtype=np.float64)
-
-rvecs, tvecs = det.estimate_pose(res.corners, camera_matrix, dist_coeffs,
-                                 marker_size=0.05)   # marker side in metres
-# rvecs, tvecs: float64 (N, 3) — rotation (Rodrigues) and translation per marker
-
-# With reprojection errors per marker
-rvecs, tvecs, reproj_errs = det.estimate_pose(
-    res.corners, camera_matrix, dist_coeffs, marker_size=0.05, return_reproj=True
-)
-# reproj_errs: float64 (N,) — RMS reprojection error in pixels per marker
-```
-
-### Fisheye distortion model
-
-Both detectors support OpenCV's fisheye distortion model:
-
-```python
-# Fisheye intrinsics with exactly 4 distortion coefficients (k1, k2, k3, k4)
-camera_matrix_fisheye = np.array([[500, 0, 320],
-                                  [0, 500, 240],
-                                  [0,   0,   1]], dtype=np.float64)
-dist_coeffs_fisheye = np.array([0.1, 0.01, -0.001, 0.0005], dtype=np.float64)
-
-rvecs, tvecs = det.estimate_pose(
-    res.corners, camera_matrix_fisheye, dist_coeffs_fisheye,
-    marker_size=0.05, fisheye=True
-)
-```
-
-### Smooth pose over time
-
-```python
-smoother = nf.PoseSmoother(process_noise=1e-4, measurement_noise=1e-2)
-
-# In your frame loop:
-rvec, tvec = det.estimate_pose(res.corners, K, D, marker_size=0.05)[0]
-rvec_smooth, tvec_smooth = smoother.update(rvec, tvec)
-```
-
-### Detect fractal markers
-
-```python
-fdet = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.85)  # size in metres (optional)
-
-res = fdet.detect(image)
-print(res.ids, res.corners.shape)   # outer 4 corners of each fractal marker
-```
-
-### Fractal pose + visualization (occlusion-robust)
-
-`FractalDetector.estimate_pose` returns one marker pose `(rvec, tvec, reproj_err)`
-or `None`. It uses every visible inner **and** outer corner correspondence when
-available (accurate, robust to occlusion) and otherwise falls back to the four
-outer corners — so you never call `solvePnP` yourself or worry about the
-empty-inner-points case. `reproj_err` (RMS pixels) lets you gate noisy poses.
-
-```python
-fdet = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.85)  # size in metres
-
-res = fdet.detect(image, with_inner_points=True)
-pose = fdet.estimate_pose(res, camera_matrix, dist_coeffs)
+res = det.detect(image, with_inner_points=True)
+pose = det.estimate_pose(res, camera_matrix, dist_coeffs)       # fisheye=True for the fisheye model
 if pose is not None:
-    rvec, tvec, reproj_err = pose      # rvec, tvec: float64 (3,); reproj_err: px
-    fdet.draw(image, res, camera_matrix, dist_coeffs, rvec, tvec)  # corners + axes
+    rvec, tvec, reproj_err = pose
+    det.draw(image, res, camera_matrix, dist_coeffs, rvec, tvec)   # outlines + axes
 ```
 
-`draw(image, result, ...)` overlays marker outlines, ids and (given a pose) the
-frame axes in place — no `cv2.polylines`/`drawFrameAxes` boilerplate. Without a
-pose, `fdet.draw(image, res)` just draws the outlines.
+The raw correspondences are exposed too: `res.points_2d` float32 `(M, 2)` and
+`res.points_3d` float32 `(M, 3)` (planar, z = 0).
 
-The raw correspondences are still exposed if you prefer to run PnP yourself:
+### Tune detection
 
 ```python
-res.points_2d   # float32 (M, 2) image points  (None unless with_inner_points=True)
-res.points_3d   # float32 (M, 3) object points (planar, z = 0)
+p = nf.DetectorParams()
+p.detection_scale = 0.5      # downscaled threshold/contour stage
+p.min_contour_size = 60      # detect smaller markers (default 120 px perimeter)
+p.adaptive_block_size = 21   # threshold window (odd, >= 3; -1 = auto)
+p.adaptive_c = 7.0           # threshold constant
+p.approx_poly_rate = 0.05    # polygon fit epsilon = perimeter * rate
+p.subpix_win_size = 4        # corner refinement half-window (0 = off)
+p.kfilter_min_dist = 10.0    # min distance between inner-corner keypoints
+det = nf.FractalDetector("FRACTAL_5L_6", params=p)
+det.params.adaptive_c = 5.0  # changes apply to the next detect()
 ```
 
-### Draw ArUco markers with pose
+### More
 
-```python
-det = nf.ArucoDetector(nf.Dict.DICT_4X4_50)
-res = det.detect(image)
-rvecs, tvecs = det.estimate_pose(res.corners, K, D, marker_size=0.05)
+- `detect(image, roi=(x, y, w, h))` — detect in a zero-copy sub-rectangle;
+  corners come back in full-image coordinates.
+- `detect_batch(images, num_threads=0, roi=None)` — parallel over frames.
+- `refine_corners(image, corners, win_size=5)` — standalone `cornerSubPix`.
+- `PoseSmoother(process_noise, measurement_noise, mode="kalman"|"ema")` —
+  temporal pose smoothing.
+- `draw(..., inplace=False)` — draw on a copy.
 
-# Draw outlines + ids + per-marker axes
-det.draw(image, res, K, D, rvecs, tvecs, marker_size=0.05, inplace=True)
-cv2.imshow("result", image)
-```
-
-### Non-destructive drawing
-
-Pass `inplace=False` to draw on a copy (preserves the original):
-
-```python
-result_image = det.draw(image, res, K, D, rvecs, tvecs, inplace=False)
-# image remains unchanged; result_image contains the annotated version
-```
-
-### Introspect dictionaries
-
-```python
-# Grid size (including border cells)
-grid_size = nf.dict_grid_size(nf.Dict.DICT_4X4_50)  # returns 6
-
-# Number of markers in the dictionary
-num_markers = nf.dict_num_markers(nf.Dict.DICT_4X4_50)  # returns 50
-num_apriltag = nf.dict_num_markers(nf.Dict.APRILTAG_36h11)  # returns 587
-```
-
-### Region of interest (ROI)
-
-Restrict detection to a sub-rectangle `(x, y, w, h)` — handy when you roughly know
-where the marker is (faster on large frames). Detection runs on a zero-copy view
-and corners come back in **full-image** coordinates.
-
-```python
-res = det.detect(image, roi=(x, y, w, h))          # also on detect_batch(..., roi=...)
-```
-
-### Refine corners
-
-Subpixel-refine corners (e.g. after a fast first pass or your own candidate search):
-
-```python
-res   = det.detect(image)
-sharp = nf.refine_corners(image, res.corners, win_size=5)   # (N, 4, 2) float32
-```
-
-### OpenCV interop
-
-Convert results to/from the `cv2.aruco` `(corners, ids)` format:
-
-```python
-corners, ids = nf.to_opencv(res)        # list[(1,4,2) float32], ids (N,1) int32
-res2 = nf.from_opencv(corners, ids)     # back to a DetectionResult
-```
-
-### Benchmark
-
-Run a quick throughput benchmark (stdlib + NumPy only):
-
-```bash
-python -m nanofractal.bench --resolution 1280x720 --detector aruco --frames 200
-# Output: latency, FPS, library versions, CPU architecture
-```
-
-The [`benchmarks/`](benchmarks/) directory has deeper scripts (install the `[bench]`
-extra for `cv2`): `compare_opencv.py` (head-to-head vs `cv2.aruco`) and
-`robustness.py` (detection rate + pose error under blur / rotation / perspective /
-noise / scale). Runnable usage scripts live in [`examples/`](examples/).
-
-### Parallel batch (offline throughput)
-
-Process many frames across a thread pool. The GIL is released, so it scales with
-cores. `num_threads=0` uses all cores.
-
-```python
-frames = [cv2.imread(p) for p in paths]            # list of uint8 arrays
-results = det.detect_batch(frames, num_threads=0)  # list[DetectionResult]
-for r in results:
-    print(r.ids)
-```
+Errors: wrong dtype / non-contiguous input → `TypeError`; unsupported shape,
+empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
 
 ---
 
-## API
+## How it is fast
 
-### `Dict` — marker dictionaries
+- **Fused adaptive threshold.** Separable box sums (horizontal first, uint16,
+  ring buffer + running vertical window), reproducing OpenCV's fixed-point /
+  float rounding of the mean exactly, written straight into a zero-bordered
+  buffer together with 8-neighbour occupancy masks. Row stripes run in parallel.
+- **Contour tracing.** Suzuki–Abe border following identical to
+  `cv::findContours(RETR_LIST, CHAIN_APPROX_NONE)`, with SIMD start detection,
+  one mask load per step and no allocation for contours below the minimum size.
+  Isolated speckle pixels (most contours in noisy frames) are skipped without
+  tracing — provably without affecting any other contour.
+- **Polygon fit + decoding** in parallel per contour, with an exact replica of
+  OpenCV 5's `approxPolyDP` and no per-frame heap traffic.
+- **Inner points.** FAST runs only around the marker; keypoint filtering and
+  matching use grids instead of O(n²) scans.
+- **Zero-copy input, GIL released**, a detector pool for `detect_batch`.
 
-| Name | Markers | Inner bits | Notes |
-|------|---------|------------|-------|
-| `DICT_4X4_50` … `DICT_4X4_1000` | 50–1000 | 4×4 | fewest bits, fastest matching |
-| `DICT_5X5_50` … `DICT_5X5_1000` | 50–1000 | 5×5 | |
-| `DICT_6X6_50` … `DICT_6X6_1000` | 50–1000 | 6×6 | |
-| `DICT_7X7_50` … `DICT_7X7_1000` | 50–1000 | 7×7 | most bits, best error detection |
-| `ARUCO_MIP_36h12` | 250 | 6×6 | legacy ArUco MIP dictionary |
-| `APRILTAG_36h11` | 587 | 6×6 | AprilTag 36h11 |
-
-All dictionaries are identical to their OpenCV counterparts — markers printed
-with `cv2.aruco.generateImageMarker` are detected directly.
-
-### `ArucoDetector(dictionary=Dict.ARUCO_MIP_36h12, max_attempts=1, params=None)`
-- `dictionary: Dict` — any `Dict` enum value.
-- `max_attempts: int` — retries per candidate with small corner jitter. `1` is
-  fastest (real-time default); raise (up to ~10) for harder images.
-- `params: DetectorParams | None` — tuning parameters (see below). `None` uses defaults.
-- `.params` — read/write access to the `DetectorParams` after creation.
-- `detect(image, roi=None) -> DetectionResult` — `roi=(x, y, w, h)` restricts
-  detection to a sub-rectangle; corners are returned in full-image coordinates.
-- `detect_batch(images, num_threads=0, roi=None) -> list[DetectionResult]`
-- `estimate_pose(corners, camera_matrix, dist_coeffs, marker_size, return_reproj=False, fisheye=False) -> (rvecs, tvecs) | (rvecs, tvecs, reproj_errs)`
-  — `corners` is `(N, 4, 2)` float32. When `return_reproj=True` returns `(rvecs, tvecs, reproj_errs)`
-  where reproj_errs is float64 `(N,)` per-marker RMS error. `fisheye=True` uses OpenCV fisheye model
-  (dist_coeffs must be exactly 4).
-- `draw(image, result, camera_matrix=None, dist_coeffs=None, rvecs=None, tvecs=None, marker_size=None, axis_length=None, inplace=True) -> image`
-  — draw outlines + ids; with poses, also draw frame axes per marker. `inplace=True` (default) modifies and returns
-  the input; `inplace=False` returns a copy (accepts read-only input).
-
-### `FractalDetector(config, marker_size=-1.0, params=None)`
-- `config: str` — one of `FRACTAL_2L_6`, `FRACTAL_3L_6`, `FRACTAL_4L_6`,
-  `FRACTAL_5L_6`.
-- `marker_size: float` — outer marker side in metres; if set, `points_3d` is
-  returned in metres (otherwise normalized).
-- `params: DetectorParams | None` — tuning parameters. `None` uses defaults.
-- `.params` — read/write access to the `DetectorParams` after creation.
-- `detect(image, with_inner_points=False, roi=None) -> DetectionResult` — `roi=(x, y, w, h)`
-  restricts detection to a sub-rectangle (corners returned in full-image coordinates).
-- `detect_batch(images, num_threads=0, roi=None) -> list[DetectionResult]`
-- `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False) -> (rvec, tvec, reproj_err) | None`
-  — single-marker pose; uses inner+outer points when ≥ 4, else the 4 outer
-  corners; `rvec`/`tvec` are float64 `(3,)`, `reproj_err` is RMS pixels. `fisheye=True`
-  uses OpenCV fisheye model (dist_coeffs must be exactly 4).
-- `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None, inplace=True) -> image`
-  — draw outlines + ids (and frame axes when a pose is given). `inplace=True` (default) modifies
-  and returns the input; `inplace=False` returns a copy.
-
-### `DetectorParams`
-
-Shared by both detectors. All fields are optional — defaults reproduce the
-original hard-coded behaviour so existing code needs no changes.
-
-| Field | Default | Description |
-|-------|---------|-------------|
-| `min_contour_size` | `-1` (auto) | Minimum contour perimeter in pixels. ArUco default: 50, Fractal: 120. |
-| `adaptive_block_size` | `-1` (auto) | Adaptive threshold block size (odd, ≥ 3). ArUco default: 13; Fractal: scales with image width. |
-| `adaptive_c` | `7.0` | Constant subtracted from the local threshold mean. |
-| `approx_poly_rate` | `0.05` | Polygon approximation: `epsilon = perimeter × rate`. |
-| `subpix_win_size` | `-1` (auto=4) | Corner sub-pixel half-window **(Fractal only)**; `0` to disable. |
-| `kfilter_min_dist` | `10.0` | Minimum distance (px) between FAST keypoints **(Fractal only)**. |
-| `detection_scale` | `1.0` | Downscale factor for the detection stage **(both detectors)**. `0.5` runs threshold/contour/decode on ¼ the pixels (≈ 4× faster); corners are mapped back and sub-pixel refined at full resolution. `min_contour_size` stays in original-image pixels. |
-
-### `DetectionResult`
-| field | dtype / shape | meaning |
-|-------|---------------|---------|
-| `ids` | int32 `(N,)` | marker ids |
-| `corners` | float32 `(N, 4, 2)` | outer corners (subpixel, clockwise) |
-| `points_2d` | float32 `(M, 2)` or `None` | inner+outer image points (fractal, `with_inner_points=True`) |
-| `points_3d` | float32 `(M, 3)` or `None` | matching object points |
-
-**Ergonomics:**
-- `len(result)` — number of markers.
-- `bool(result)` — `True` if any markers detected.
-- `for mid, corners in result:` — iterate over `(marker_id, corners_array)` pairs.
-- `repr(result)` — concise summary including marker count and ids.
-
-Empty results are returned as correctly-shaped empty arrays (`(0,)`, `(0, 4, 2)`),
-never `None`.
-
-### Module-level functions
-
-| Function | Returns | Purpose |
-|----------|---------|---------|
-| `generate_aruco(marker_id, size_px=200, dictionary=Dict.DICT_4X4_50, border_bits=1)` | `uint8 (size_px, size_px)` | Generate an ArUco marker image. |
-| `generate_fractal(config, size_px=400)` | `uint8 (size_px, size_px)` | Generate the external level of a fractal marker. |
-| `dict_grid_size(d: Dict)` | `int` | Full grid size (including border) for a dictionary. |
-| `dict_num_markers(d: Dict)` | `int` | Number of markers in a dictionary. |
-| `refine_corners(image, corners, win_size=5)` | `float32 (N, 4, 2)` | Subpixel-refine corners (`cornerSubPix`). |
-| `to_opencv(result)` | `(list[(1,4,2) float32], ids (N,1) int32)` | Convert to the `cv2.aruco` format. |
-| `from_opencv(corners, ids)` | `DetectionResult` | Build a result from `cv2.aruco` output. |
-
-**Note on `generate_fractal`:** Returns only the outermost marker level, which is
-detectable by `FractalDetector`. It is **not** a full multi-level nested composite.
-
-### `PoseSmoother`
-
-Temporal smoothing of 6-DOF pose using Kalman filtering or exponential moving average.
-
-```python
-smoother = nf.PoseSmoother(process_noise=1e-4, measurement_noise=1e-2, mode="kalman")
-
-# Per frame:
-rvec, tvec = smoother.update(rvec_measured, tvec_measured)
-
-# Reset state (e.g. on marker loss):
-smoother.reset()
-```
-
-- `mode="kalman"` — Kalman filter (default).
-- `mode="ema"` — Exponential moving average.
-- Rvec is smoothed component-wise (suitable for small inter-frame rotation changes).
-
-### Errors
-- Wrong dtype / non-contiguous input → `TypeError`.
-- Unsupported shape, empty frame, invalid dictionary or fractal config → `ValueError`.
-- Invalid camera intrinsics or distortion → `ValueError` with clear message.
-
----
-
-## Performance notes
-
-- **Zero-copy input.** A contiguous `uint8` array is wrapped as a `cv::Mat` over
-  the same buffer — no copy. Non-contiguous or wrong-dtype inputs raise instead of
-  silently copying.
-- **GIL released** during the native detection, so other Python threads keep
-  running and `detect_batch` scales.
-- **Thread safety.** The ArUco detector is stateless and shared across batch
-  workers. The fractal detector is not thread-safe, so `detect_batch` uses a pool
-  of independent detectors (one per worker). A single detector object is fine to
-  call from one thread at a time.
+The one intentional behaviour difference from the reference detector: with
+`with_inner_points=True`, the FAST response threshold is computed over the
+marker's neighbourhood instead of the whole frame. Outer corners are unchanged.
 
 ---
 
 ## Changelog
 
-See [CHANGELOG.md](CHANGELOG.md) for the full version history.
-
-**Latest (0.4):**
-- ROI detection (`detect(image, roi=(x, y, w, h))`).
-- `refine_corners`, `to_opencv` / `from_opencv` converters.
-- `examples/` scripts and `benchmarks/` (vs `cv2.aruco` + robustness sweeps).
-- Coverage + ASan/UBSan CI; faster releases (cached OpenCV, parallel per-arch wheels).
-
-**Earlier (0.3):** marker generation, `ArucoDetector.draw()`, per-marker reprojection
-errors + fisheye, `PoseSmoother`, dictionary introspection, benchmark CLI, aarch64 wheels.
-
----
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Citation
 
 If you use this in research, please cite the original work:
 
 - F. J. Romero-Ramirez, R. Muñoz-Salinas, R. Medina-Carnicer,
-  *"Speeded up detection of squared fiducial markers"*, Image and Vision
-  Computing, 76, 2018.
-- S. Garrido-Jurado, R. Muñoz-Salinas, F. J. Madrid-Cuevas, R. Medina-Carnicer,
-  *"Generation of fiducial marker dictionaries using mixed integer linear
-  programming"*, Pattern Recognition, 51, 2016.
-- F. J. Romero-Ramirez, R. Muñoz-Salinas, R. Medina-Carnicer,
   *"Fractal Markers: A New Approach for Long-Range Marker Pose Estimation Under
   Occlusion"*, IEEE Access, 7, 2019.
+- F. J. Romero-Ramirez, R. Muñoz-Salinas, R. Medina-Carnicer,
+  *"Speeded up detection of squared fiducial markers"*, Image and Vision
+  Computing, 76, 2018.
 
 ## License
 
-Apache-2.0. The vendored detectors (ArUco Nano, Fractal markers) are © their
-authors and used under their terms; see `third_party/` and `PATCHES.md`.
+Apache-2.0. The vendored fractal detector is © its authors and used under its
+terms; see `third_party/` and `PATCHES.md`.
