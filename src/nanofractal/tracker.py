@@ -73,9 +73,10 @@ class FractalTracker:
 
     def detect(self, image: np.ndarray, with_inner_points: bool = False) -> DetectionResult:
         det = self.detector
+        prev = self._prev
         roi = self._roi(image.shape)
         res = None
-        if roi is not None:
+        if roi is not None and prev is not None:
             p = det.params
             auto = p.adaptive_block_size == -1
             if auto:
@@ -85,7 +86,7 @@ class FractalTracker:
             finally:
                 if auto:
                     p.adaptive_block_size = -1
-            if len(res) == 0 or len(res) < len(self._prev):
+            if len(res) == 0 or len(res) < len(prev):
                 res = None
         if res is None:
             self.full_frame_detections += 1
