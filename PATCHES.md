@@ -56,3 +56,19 @@ marker and rejected the level.
 
 Regression test: `tests/test_generate.py::test_nested_round_trip_detects_every_level`
 (every level of every config is detected on a nested render).
+
+## third_party/nanofractal.h — bounded reads in getSubpixelValue
+
+**Symptom:** AddressSanitizer: heap-buffer-overflow reading the input image,
+e.g. on a 333×1001 (taller than wide) grayscale frame.
+
+**Root cause:** the bilinear sample reads `(x+1, y)`, `(x, y+1)` and
+`(x+1, y+1)` with no upper-bound check, and the row clamp compares with the
+image *width* (`if(tl.y>=im_grey.cols) tl.y=im_grey.rows-1;`), so a sample
+near the bottom of a tall image can read whole rows past the buffer.
+
+**Patch:** the four reads go through a helper that clamps the linear index to
+the last pixel, marked with a `// nanofractal patch:` comment. In-bounds
+results are unchanged; the optimised pipeline (`src/fractal_fast.hpp`) uses
+the identical clamp, so the two stay bit-identical. Found by the CI ASan job
+running `tests/test_reference_equivalence.py::test_bgr_and_odd_sizes_identical`.

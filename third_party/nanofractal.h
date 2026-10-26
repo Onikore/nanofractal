@@ -1613,10 +1613,17 @@ float FractalMarkerDetector::getSubpixelValue(const cv::Mat &im_grey,const cv::P
     if(tl.y<0) tl.y=0;
     if(tl.x>=im_grey.cols)tl.x=im_grey.cols-1;
     if(tl.y>=im_grey.cols)tl.y=im_grey.rows-1;
-    return (1.f-decpartY)*(1.-decpartX)*float(im_grey.at<uchar>(tl.y,tl.x))+
-            decpartX*(1-decpartY)*float(im_grey.at<uchar>(tl.y,tl.x+1))+
-            (1-decpartX)*decpartY*float(im_grey.at<uchar>(tl.y+1,tl.x))+
-            decpartX*decpartY*float(im_grey.at<uchar>(tl.y+1,tl.x+1));
+    // nanofractal patch: the clamps above let (x+1, y+1) -- and, through the
+    // tl.y >= cols typo, whole rows -- fall outside the image; reads are
+    // clamped to the last pixel instead of running off the buffer (see PATCHES.md)
+    const uchar *d_ = im_grey.data;
+    const size_t st_ = im_grey.step;
+    const size_t last_ = (size_t)(im_grey.rows - 1) * st_ + (size_t)(im_grey.cols - 1);
+    auto px_ = [&](int y_, int x_) { return float(d_[std::min((size_t)y_ * st_ + (size_t)x_, last_)]); };
+    return (1.f-decpartY)*(1.-decpartX)*px_(tl.y,tl.x)+
+            decpartX*(1-decpartY)*px_(tl.y,tl.x+1)+
+            (1-decpartX)*decpartY*px_(tl.y+1,tl.x)+
+            decpartX*decpartY*px_(tl.y+1,tl.x+1);
 }
 
 
