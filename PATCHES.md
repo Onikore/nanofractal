@@ -37,3 +37,22 @@ The include is removed (replaced by a `// nanofractal patch:` comment) so the
 library builds against a **minimal OpenCV** without the `highgui` module — which
 is how the portable wheels are built in CI (`ci/build-opencv.sh`). Builds against
 a full system OpenCV are unaffected.
+
+## third_party/nanofractal.h — round the submarker mask extent
+
+**Symptom:** with `-ffast-math` (which the CI wheels enable via `NF_MARCH`),
+level 3 of `FRACTAL_5L_6` was never detected, even on a perfect render.
+
+**Root cause:** `FractalMarker::addSubFractalMarker` computes the submarker's
+extent in parent bits as a float (`nsubBits = subSize / bitSize`) and then
+truncates it: `int x_max = x_min + nsubBits`. The value is an exact integer in
+theory, but float division can land just below it (fast-math turns the
+division into a reciprocal multiply: 6.0 → 5.9999994). The mask then covered
+one cell too few, so the decoder compared the parent's bits under the child
+marker and rejected the level.
+
+**Patch:** `std::lround(nsubBits)` instead of truncation, marked with a
+`// nanofractal patch:` comment.
+
+Regression test: `tests/test_generate.py::test_nested_round_trip_detects_every_level`
+(every level of every config is detected on a nested render).

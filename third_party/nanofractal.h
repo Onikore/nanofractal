@@ -889,10 +889,14 @@ void FractalMarker::addSubFractalMarker(FractalMarker submarker)
     float bitSize = getMarkerSize() / (nBitsSqrt+2.0f);
     float nsubBits = submarker.getMarkerSize() / bitSize;
 
+    // nanofractal patch: round, not truncate. nsubBits is an exact integer in
+    // theory, but float division can land just below it (e.g. 5.9999994 under
+    // -ffast-math reciprocal division), which shrank the mask by one cell and
+    // made that level undecodable (see PATCHES.md).
     int x_min = int(round(submarker.keypts[0].pt.x / bitSize + nBitsSqrt/2));
-    int x_max = x_min + nsubBits;
+    int x_max = x_min + int(std::lround(nsubBits));
     int y_min = int(round(-submarker.keypts[0].pt.y / bitSize + nBitsSqrt/2));
-    int y_max = y_min + nsubBits;
+    int y_max = y_min + int(std::lround(nsubBits));
 
     for(int y=y_min; y<y_max; y++){
         for(int x=x_min; x<x_max; x++){
