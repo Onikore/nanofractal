@@ -123,6 +123,7 @@ struct FractalDetectorImpl {
 
   FastFractalDetector &detector(size_t t) {
     pool[t]->params = params;
+    pool[t]->serial = false;
     return *pool[t];
   }
 
@@ -191,7 +192,7 @@ struct FractalDetectorImpl {
     while ((int)pool.size() < T)
       pool.push_back(make_detector());
     for (int t = 0; t < T; t++)
-      detector(t); // sync params
+      detector(t).serial = true; // sync params; one frame per core
 
     float ox_ = has_roi ? (float)rx : 0.f;
     float oy_ = has_roi ? (float)ry : 0.f;
@@ -507,6 +508,39 @@ NB_MODULE(_nanofractal, m) {
       },
       nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
       nb::arg("image"), nb::arg("inner"));
+
+  // Test hook: trace a 0/1 uint8 image with the parallel band tracer
+  // (band_rows rows per band, all threads) and report whether the contours of
+  // length >= min_size equal sequential cv::findContours(RETR_LIST, NONE).
+  m.def("_tracer_matches_findcontours", [](RawArray arr, int min_size,
+                                           int band_rows) {
+    cv::Mat im = as_mat(arr);
+    if (im.channels() != 1)
+      throw nb::value_error("expected a single-channel 0/1 image");
+    std::vector<std::vector<cv::Point>> ref, refk, mine;
+    bool same;
+    {
+      nb::gil_scoped_release rel;
+      const int threads = cv::getNumThreads();
+      cv::setNumThreads(1); // OpenCV 5.0's parallel findContours is the suspect
+      cv::Mat r = im != 0;
+      cv::findContours(r, ref, cv::noArray(), cv::RETR_LIST,
+                       cv::CHAIN_APPROX_NONE);
+      cv::setNumThreads(threads);
+      for (auto &c : ref)
+        if ((int)c.size() >= min_size)
+          refk.push_back(c);
+      cv::Mat bin(im.rows + 2, im.cols + 2, CV_8SC1, cv::Scalar(0));
+      cv::Mat(im != 0).convertTo(bin(cv::Rect(1, 1, im.cols, im.rows)), CV_8S,
+                                 1.0 / 255);
+      nanofractal_fast::ContourTracer tr;
+      tr.min_band_rows = std::max(1, band_rows);
+      tr.run(bin, min_size,
+             [&](const cv::Point *p, int n) { mine.emplace_back(p, p + n); });
+      same = mine == refk;
+    }
+    return nb::make_tuple(same, (int)refk.size());
+  });
 
   m.def("_fractal_external_id", [](std::string config) {
     nanofractal::FractalMarkerSet s(config);

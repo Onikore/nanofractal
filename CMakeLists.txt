@@ -37,7 +37,7 @@ target_compile_options(_nanofractal PRIVATE
   $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O3>)
 
 # ---------------------------------------------------------------------------
-# Architecture & FP tuning (GCC / Clang only; MSVC is skipped silently).
+# Architecture tuning (GCC / Clang: -march; MSVC: /arch:AVX2 for x86-64-v3).
 #
 #   -DNF_NATIVE=ON          local dev: -march=native
 #   -DNF_MARCH=x86-64-v3   portable:  -march=<isa>  (CI wheels)
@@ -56,7 +56,13 @@ target_compile_options(_nanofractal PRIVATE
 option(NF_NATIVE "Enable -march=native (local dev only; not for distributed wheels)" OFF)
 set(NF_MARCH "" CACHE STRING "ISA baseline passed to -march= (e.g. x86-64-v3). Used in CI wheels.")
 
-if(NOT MSVC)
+if(MSVC)
+  # MSVC has no -march; an x86-64-v3 (AVX2) baseline maps to /arch:AVX2 so the
+  # SIMD paths in fractal_fast.hpp (guarded by __AVX2__) are compiled in.
+  if(NF_NATIVE OR NF_MARCH MATCHES "x86-64-v3|x86-64-v4|haswell|skylake|native")
+    target_compile_options(_nanofractal PRIVATE /arch:AVX2)
+  endif()
+elseif(NOT MSVC)
   if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64|arm64|armv8")
     # ARM / aarch64 path: rely on the compiler's default ARMv8-A target
     # (NEON always available).  Do NOT apply NF_MARCH — an x86 ISA string

@@ -81,3 +81,26 @@ def test_inner_points_same_markers():
     assert got.ids.tolist() == ref[0].tolist()
     np.testing.assert_array_equal(got.corners, ref[1])
     assert got.points_2d.shape[0] > 0
+
+
+@pytest.mark.parametrize("band_rows", [1, 2, 3, 7, 96])
+def test_parallel_tracer_matches_findcontours(band_rows):
+    # The band-parallel contour tracer must return exactly the contours (points
+    # and order) of sequential cv::findContours, even with bands of a single row
+    # where nearly every contour crosses band boundaries.
+    rng = np.random.default_rng(band_rows)
+    total = 0
+    for t in range(60):
+        h, w = rng.integers(4, 160, size=2)
+        if t % 3 == 0:
+            img = (rng.random((h, w)) < rng.uniform(0.2, 0.8)).astype(np.uint8)
+        else:  # blobs with holes, thin walls and nesting
+            f = rng.random((h + 4, w + 4))
+            f = (f[:-4, :-4] + f[2:-2, 2:-2] + f[4:, 4:] + f[2:-2, :-4] + f[:-4, 4:]) / 5
+            img = (f > rng.uniform(0.4, 0.6)).astype(np.uint8)
+        img = np.ascontiguousarray(img)
+        for min_size in (1, 2, 30):
+            same, n = _nf._tracer_matches_findcontours(img, min_size, band_rows)
+            assert same, f"image {t} ({h}x{w}), min_size {min_size}"
+            total += n
+    assert total > 0

@@ -20,19 +20,25 @@ Since 0.6 the library is fractal-only (the ArUco detector was removed).
 The hot path (adaptive threshold, contour tracing, polygon fitting, decoding)
 is a purpose-built reimplementation that returns **bit-identical outer
 corners** to the reference detector (checked by the test-suite against
-`_reference_detect`). Median latency per frame, `FRACTAL_5L_6`, synthetic
-scenes from `nanofractal.bench`, i5-12400 (6P+0E, 12 threads), OpenCV 5.0,
-`NF_MARCH=x86-64-v3`:
+`_reference_detect`), and runs on all cores *within* a single frame.
 
-| scene / mode | res | 0.5 (1 core) | 0.6 (1 core) | 0.5 (all cores) | 0.6 (all cores) |
-|---|---|---:|---:|---:|---:|
-| marker in clutter, `detect` | 1080p | 6.41 ms | 3.17 ms | 4.76 ms | **1.52 ms** |
-| marker in clutter, `with_inner_points` | 1080p | 8.40 ms | 4.00 ms | 7.12 ms | **2.71 ms** |
-| no marker (clutter only) | 1080p | 6.47 ms | 2.71 ms | 4.48 ms | **1.30 ms** |
-| marker in clutter, `detect` | 4K | 23.1 ms | 12.2 ms | 16.1 ms | **6.28 ms** |
-| marker in clutter, `with_inner_points` | 4K | 28.8 ms | 14.5 ms | 22.6 ms | **9.05 ms** |
-| no marker (clutter only) | 4K | 24.1 ms | 11.9 ms | 16.8 ms | **6.04 ms** |
-| `detect_batch`, 48 × 1080p, all cores | — | — | — | 882 fps | **1379 fps** |
+Median latency per frame, `FRACTAL_5L_6`, synthetic scenes from
+`nanofractal.bench`, i5-12400 (6 cores / 12 threads), `NF_MARCH=x86-64-v3`,
+**OpenCV 4.10 — the configuration of the published wheels**:
+
+| scene / mode | res | 0.5, 1 core | 0.6, 1 core | 0.5, all cores | 0.6, all cores | gain (all cores) |
+|---|---|---:|---:|---:|---:|---:|
+| marker in clutter, `detect` | 1080p | 11.3 ms | 3.18 ms | 12.3 ms | **1.14 ms** | ×10.8 |
+| marker in clutter, `with_inner_points` | 1080p | 13.4 ms | 4.23 ms | 14.4 ms | **2.29 ms** | ×6.3 |
+| no marker (clutter only) | 1080p | 12.7 ms | 2.75 ms | 13.8 ms | **0.71 ms** | ×19 |
+| marker in clutter, `detect` | 4K | 52.6 ms | 12.5 ms | 49.5 ms | **4.17 ms** | ×11.9 |
+| marker in clutter, `with_inner_points` | 4K | 54.6 ms | 16.3 ms | 55.3 ms | **7.40 ms** | ×7.5 |
+| no marker (clutter only) | 4K | 55.3 ms | 12.7 ms | 55.1 ms | **4.40 ms** | ×12.5 |
+| `detect_batch`, 48 × 1080p | — | — | — | 382 fps | **~1360 fps** | ×3.6 |
+
+With OpenCV 5.0 (whose own `findContours` is already ~3× faster than 4.10's)
+0.6 is 2–2.5× faster than 0.5 on one core and 3–8.5× with all cores, e.g.
+1080p `detect` 4.66 → 0.92 ms and 4K 15.9 → 4.14 ms.
 
 Reproduce on your machine:
 
@@ -58,8 +64,9 @@ Levers:
 pip install nanofractal
 ```
 
-Wheels are available for Linux x86_64/aarch64 and Windows AMD64. They bundle a
-minimal OpenCV, so no system OpenCV is required at runtime.
+Wheels are available for Linux x86_64/aarch64 and Windows AMD64 (x86_64 wheels
+require AVX2, i.e. Haswell 2013 or newer). They bundle a minimal OpenCV, so no
+system OpenCV is required at runtime.
 
 ### Build from source
 
@@ -164,12 +171,17 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
   float rounding of the mean exactly, written straight into a zero-bordered
   buffer together with 8-neighbour occupancy masks. Row stripes run in parallel.
 - **Contour tracing.** Suzuki–Abe border following identical to
-  `cv::findContours(RETR_LIST, CHAIN_APPROX_NONE)`, with SIMD start detection,
-  one mask load per step and no allocation for contours below the minimum size.
-  Isolated speckle pixels (most contours in noisy frames) are skipped without
-  tracing — provably without affecting any other contour.
-- **Polygon fit + decoding** in parallel per contour, with an exact replica of
-  OpenCV 5's `approxPolyDP` and no per-frame heap traffic.
+  `cv::findContours(RETR_LIST, CHAIN_APPROX_NONE)` (sequential), with SIMD
+  start detection, one mask load per step and no allocation for contours below
+  the minimum size. Isolated speckle pixels (most contours in noisy frames) are
+  skipped without tracing. Row bands are traced in parallel: each band keeps
+  its own pixel labels and a contour is kept by the band holding its start,
+  the ownership rule also used by OpenCV's data-race-free TRUCO tracer; the
+  test-suite checks the result against `findContours` on millions of
+  contours, including bands one row high.
+- **Polygon fit + decoding** in parallel per contour, with exact replicas of
+  OpenCV 4's and OpenCV 5's `approxPolyDP` (they differ) and no per-frame heap
+  traffic.
 - **Inner points.** FAST runs only around the marker; keypoint filtering and
   matching use grids instead of O(n²) scans.
 - **Zero-copy input, GIL released**, a detector pool for `detect_batch`.

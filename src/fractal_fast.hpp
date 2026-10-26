@@ -79,6 +79,8 @@ inline void neighbour_masks(const cv::Mat &bin, cv::Mat &nbm) {
 // ---------------------------------------------------------------------------
 class AdaptiveThreshold {
 public:
+  int max_threads = 0; // row stripes; 0 = cv::getNumThreads()
+
   // dst: (H+2) x (W+2) int8 buffer; interior pixel (x,y) lands at (x+1,y+1).
   // Foreground (dark relative to the local mean) = 1, background and border =
   // 0. nbm (optional): neighbour masks of dst, computed on the fly while the
@@ -107,7 +109,8 @@ public:
     // result does not depend on the split.
     const int H = src.rows;
     const int r = k / 2;
-    int nstripes = std::max(1, cv::getNumThreads());
+    int nstripes =
+        max_threads > 0 ? max_threads : std::max(1, cv::getNumThreads());
     nstripes = std::min(
         nstripes, std::max(1, H / std::max(48, 2 * k))); // keep priming cheap
     if ((int)scratch_.size() < nstripes)
@@ -366,32 +369,113 @@ private:
 // ---------------------------------------------------------------------------
 class ContourTracer {
 public:
+  // Bands narrower than this are not worth a thread (tests lower it to force
+  // many band boundaries).
+  int min_band_rows = 96;
+  int max_threads = 0; // bands; 0 = cv::getNumThreads()
+
   template <typename F> void run(cv::Mat &img, int min_size, F &&on_contour) {
     neighbour_masks(img, own_nbm_);
     run(img, own_nbm_, min_size, std::forward<F>(on_contour));
   }
 
   // nbm: neighbour_masks(img), e.g. produced by AdaptiveThreshold::run.
+  //
+  // Parallel, exact. The image rows are split into bands traced concurrently.
+  // A trace's path depends only on which pixels are non-zero (nbm, shared and
+  // read-only); the pixel labels findContours writes only decide which later
+  // pixels still start a contour. Each band therefore keeps the labels of its
+  // own rows in a private copy and drops label writes outside them (as in
+  // OpenCV's data-race-free TRUCO tracer). A band also meets borders that
+  // started in an earlier band and reach into it; it traces them once (their
+  // labels then suppress their other starts in the band) and discards them:
+  // a border is kept only by the band holding its canonical start -- the top
+  // row of an outer border, the row below the top row of a hole border (the
+  // top row of the hole itself). Everything else is identical to the
+  // sequential raster scan, so are the contours and, after merging the bands
+  // in order, their order.
   template <typename F>
   void run(cv::Mat &img, const cv::Mat &nbm, int min_size, F &&on_contour) {
     CV_Assert(img.isContinuous() && nbm.isContinuous() &&
-              nbm.size() == img.size());
-    moff_ = nbm.data - img.data;
+              nbm.size() == img.size() && img.rows >= 3);
+    const int H = img.rows;
+    int nb = max_threads > 0 ? max_threads : std::max(1, cv::getNumThreads());
+    nb = std::min(nb, std::max(1, (H - 2) / min_band_rows));
+    if ((int)bands_.size() < nb)
+      bands_.resize(nb);
+    for (int b = 0; b < nb; b++) {
+      Band &bd = bands_[b];
+      bd.y0 = 1 + (int)((int64_t)(H - 2) * b / nb);
+      bd.y1 = 1 + (int)((int64_t)(H - 2) * (b + 1) / nb);
+    }
+    if (nb == 1) {
+      run_band(img, nbm, img.ptr<int8_t>(1), min_size, bands_[0]);
+    } else {
+      cv::parallel_for_(
+          cv::Range(0, nb),
+          [&](const cv::Range &rg) {
+            for (int b = rg.start; b < rg.end; b++) {
+              Band &bd = bands_[b];
+              // private labels of the band's rows (initially the 0/1 image)
+              // (kPad zero bytes in front: the scan reads row[x - 1] at x = 0)
+              const size_t bytes = (size_t)(bd.y1 - bd.y0) * img.step;
+              bd.labels.resize(bytes + kPad);
+              std::memset(bd.labels.data(), 0, kPad);
+              std::memcpy(bd.labels.data() + kPad, img.ptr(bd.y0), bytes);
+              run_band(img, nbm, bd.labels.data() + kPad, min_size, bd);
+            }
+          },
+          nb);
+    }
+    // cv::findContours(RETR_LIST) lists contours in reverse discovery order
+    for (int b = nb; b-- > 0;) {
+      const Band &bd = bands_[b];
+      for (size_t i = bd.kept.size(); i-- > 0;)
+        on_contour(bd.pts.data() + bd.kept[i].first, (int)bd.kept[i].second);
+    }
+  }
+
+private:
+  static constexpr size_t kPad = 64;
+  struct Band {
+    int y0 = 1, y1 = 1;         // padded rows [y0, y1)
+    std::vector<int8_t> labels; // private labels of rows [y0, y1)
+    std::vector<cv::Point> pts; // sized as capacity; npts in use
+    size_t npts = 0;
+    std::vector<std::pair<size_t, size_t>> kept;
+    std::vector<uint64_t> ev;
+  };
+  std::vector<Band> bands_;
+  cv::Mat own_nbm_;
+
+  // lab: labels of padded row bd.y0 (rows y0..y1-1 follow with img's step)
+  void run_band(const cv::Mat &img, const cv::Mat &nbm, int8_t *lab,
+                int min_size, Band &bd) {
     const int step = (int)img.step;
-    const int W = img.cols, H = img.rows; // padded size
+    const int W = img.cols;
     int deltas[16] = {1,  -step + 1, -step, -step - 1,
                       -1, step - 1,  step,  step + 1};
     std::memcpy(deltas + 8, deltas, 8 * sizeof(int));
+    Trace tr;
+    tr.deltas = deltas;
+    tr.lo = nbm.ptr<uint8_t>(bd.y0);
+    tr.hi = nbm.ptr<uint8_t>(bd.y1);
+    tr.loff = lab - (const int8_t *)tr.lo;
+    tr.bd = &bd;
 
-    kept_.clear();
-    npts_ = 0;
-    if (pts_.size() < 4096)
-      pts_.resize(4096);
+    bd.kept.clear();
+    bd.npts = 0;
+    if (bd.pts.size() < 4096)
+      bd.pts.resize(4096);
     const int end = W - 1; // scan x in [1, W-1)
     const bool mark_isolated = min_size > 1;
-    ev_.assign((size_t)(end + 63) / 64, 0);
-    for (int y = 1; y < H - 1; y++) {
-      int8_t *row = img.ptr<int8_t>(y);
+    bd.ev.assign((size_t)(end + 63) / 64, 0);
+    // a contour is ours iff its top row (outer) / top row + 1 (hole) is in
+    // the band; pt.y is the padded row - 1
+    const int keep_outer = bd.y0 - 1, keep_hole = bd.y0 - 2;
+    for (int y = bd.y0; y < bd.y1; y++) {
+      int8_t *row = lab + (size_t)(y - bd.y0) * step;
+      const uint8_t *nrow = nbm.ptr<uint8_t>(y);
       // A contour starts at x when (left, pixel) = (0, 1) -- outer border -- or
       // (>= 1, 0) -- hole border, left pixel foreground and not yet marked as a
       // right boundary. Pixels left of the scan position are never relabelled
@@ -399,56 +483,33 @@ public:
       // remove later starts on this row, never create one: the starts of a row
       // can be collected up front in bulk and re-checked when reached, which is
       // exactly the sequential raster scan of cv::findContours.
-#ifdef NF_TRACE_STATS
-      uint64_t ts0 = __rdtsc();
-#endif
-      collect_starts(row, nbm.ptr<uint8_t>(y), end, mark_isolated);
-#ifdef NF_TRACE_STATS
-      stat_scan += __rdtsc() - ts0;
-#endif
-      for (size_t wi = 0; wi < ev_.size(); wi++) {
-        uint64_t bits = ev_[wi];
+      collect_starts(row, nrow, end, mark_isolated, bd.ev.data());
+      for (size_t wi = 0; wi < bd.ev.size(); wi++) {
+        uint64_t bits = bd.ev[wi];
         while (bits) {
           const int x = (int)(wi * 64) + ctz64(bits);
           bits &= bits - 1;
           if (!is_start(row[x - 1], row[x]))
             continue; // removed by an earlier trace
-#ifdef NF_TRACE_STATS
-          uint64_t t1 = __rdtsc();
-#endif
           const int is_hole = row[x] == 0;
-          const size_t start = npts_;
-          trace(row + x - is_hole, deltas, cv::Point(x - is_hole - 1, y - 1),
-                is_hole != 0);
-          const size_t n = npts_ - start;
-#ifdef NF_TRACE_STATS
-          uint64_t t2 = __rdtsc();
-          stat_trace += t2 - t1;
-          stat_contours++;
-          stat_steps += n;
-          if (n < 4) {
-            stat_small_cyc += t2 - t1;
-            stat_small++;
-          }
-#endif
-          if ((int)n >= min_size)
-            kept_.push_back({start, n});
+          const size_t start = bd.npts;
+          const int miny = tr.run(nrow + x - is_hole,
+                                  cv::Point(x - is_hole - 1, y - 1), is_hole);
+          const size_t n = bd.npts - start;
+          if ((int)n >= min_size && miny >= (is_hole ? keep_hole : keep_outer))
+            bd.kept.push_back({start, n});
           else
-            npts_ = start;
+            bd.npts = start;
         }
       }
     }
-    // cv::findContours(RETR_LIST) lists contours in reverse discovery order
-    for (size_t i = kept_.size(); i-- > 0;)
-      on_contour(pts_.data() + kept_[i].first, (int)kept_[i].second);
   }
 
-private:
   static inline bool is_start(int8_t l, int8_t p) {
     return (l == 0 && p == 1) || (p == 0 && l > 0);
   }
 
-  // ev_ bit x = a contour starts at x given the row as it is now.
+  // ev bit x = a contour starts at x given the row as it is now.
   //
   // With skip_isolated, foreground pixels whose 8 neighbours are all
   // background are dropped: findContours traces each as a one-point "single
@@ -457,9 +518,8 @@ private:
   // component, so no trace ever reads it; the one thing its mark changes is the
   // hole test of its right neighbour, which is suppressed here too. On noisy
   // frames these speckles are the large majority of all contours.
-  void collect_starts(const int8_t *row, const uint8_t *nb, int end,
-                      bool skip_isolated) {
-    uint64_t *ev = ev_.data();
+  static void collect_starts(const int8_t *row, const uint8_t *nb, int end,
+                             bool skip_isolated, uint64_t *ev) {
     uint32_t iso_carry = 0; // isolated flag of pixel x-1
     int x = 0;              // x = 0 is the zero border: never a start
 #if defined(__AVX2__)
@@ -539,104 +599,100 @@ private:
 #endif
   }
 
-  // icvFetchContour (8-bit, nbd = 2, CHAIN_APPROX_NONE), appending to pts_
-  inline void trace(int8_t *i0, const int *deltas, cv::Point pt, bool hole) {
-    const ptrdiff_t moff = moff_;
-    static const int dx[8] = {1, 1, 0, -1, -1, -1, 0, 1};
-    static const int dy[8] = {0, -1, -1, -1, 0, 1, 1, 1};
-    const int8_t nbd = 2;
-    const int8_t right = (int8_t)(nbd | -128);
-    cv::Point *w = pts_.data() + npts_, *wend = pts_.data() + pts_.size();
+  // icvFetchContour (8-bit, nbd = 2, CHAIN_APPROX_NONE) walking the neighbour
+  // masks; labels are written to the band's private rows only.
+  struct Trace {
+    const int *deltas;
+    const uint8_t *lo, *hi; // mask rows of the band
+    ptrdiff_t loff;         // mask pointer -> label pointer, inside the band
+    Band *bd;
 
-    // initial direction: first non-zero neighbour clockwise from s_end - 1
-    // (s_end itself is always background here). None -> single pixel.
-    int s_end = hole ? 0 : 4;
-    unsigned m0 = (uint8_t)i0[moff];
-    m0 |= m0 << 8;
-    const unsigned cand =
-        m0 & (((1u << (s_end + 8)) - 1) & ~((1u << (s_end + 1)) - 1));
-    if (!cand) {
-      *i0 = right;
-      if (w == wend)
-        w = grow(w);
-      *w++ = pt;
-      npts_ = w - pts_.data();
-      return;
+    inline void label(const uint8_t *p, bool is_right) const {
+      if (p < lo || p >= hi)
+        return; // another band's row: its owner keeps its own labels
+      int8_t *q = (int8_t *)(p + loff);
+      const int8_t cur = *q;
+      // right boundary, else first visit 1 -> nbd (branch-free: the outcome
+      // is data dependent and mispredicts badly as a branch)
+      const int8_t visited = cur == 1 ? (int8_t)2 : cur;
+      *q = is_right ? (int8_t)(2 | -128) : visited;
     }
-    int s = msb32(cand) & 7;
-    int8_t *const i1 = i0 + deltas[s];
-    int8_t *i3 = i0, *i4;
-    for (;;) {
-      s_end = s;
-      // next non-zero neighbour counter-clockwise from s (s+1 .. s+8)
-      unsigned m = (uint8_t)i3[moff];
-      m |= m << 8;
-      s = (s + 1 + ctz32(m >> (s + 1))) & 7;
-      i4 = i3 + deltas[s];
-      // mark: right boundary, else first visit 1 -> nbd (branch-free; the
-      // outcome is data dependent and mispredicts badly as a branch)
-      {
-        const int8_t cur = *i3;
-        const int8_t visited = cur == 1 ? nbd : cur;
-        *i3 = (unsigned)(s - 1) < (unsigned)s_end ? right : visited;
+
+    // returns the smallest pt.y visited; appends the points to bd->pts
+    inline int run(const uint8_t *i0, cv::Point pt, int hole) const {
+      static const int dx[8] = {1, 1, 0, -1, -1, -1, 0, 1};
+      static const int dy[8] = {0, -1, -1, -1, 0, 1, 1, 1};
+      Band &b = *bd;
+      cv::Point *w = b.pts.data() + b.npts, *wend = b.pts.data() + b.pts.size();
+      int miny = pt.y;
+
+      // initial direction: first non-zero neighbour clockwise from s_end - 1
+      // (s_end itself is always background here). None -> single pixel.
+      int s_end = hole ? 0 : 4;
+      unsigned m0 = *i0;
+      m0 |= m0 << 8;
+      const unsigned cand =
+          m0 & (((1u << (s_end + 8)) - 1) & ~((1u << (s_end + 1)) - 1));
+      if (!cand) {
+        label(i0, true);
+        if (w == wend)
+          w = grow(b, w, wend);
+        *w++ = pt;
+        b.npts = w - b.pts.data();
+        return miny;
       }
-      if (w == wend) {
-        w = grow(w);
-        wend = pts_.data() + pts_.size();
+      int s = msb32(cand) & 7;
+      const uint8_t *const i1 = i0 + deltas[s];
+      const uint8_t *i3 = i0, *i4;
+      for (;;) {
+        s_end = s;
+        // next non-zero neighbour counter-clockwise from s (s+1 .. s+8)
+        unsigned m = *i3;
+        m |= m << 8;
+        s = (s + 1 + ctz32(m >> (s + 1))) & 7;
+        i4 = i3 + deltas[s];
+        label(i3, (unsigned)(s - 1) < (unsigned)s_end);
+        if (w == wend)
+          w = grow(b, w, wend);
+        *w++ = pt;
+        miny = std::min(miny, pt.y);
+        pt.x += dx[s];
+        pt.y += dy[s];
+        if (i4 == i0 && i3 == i1)
+          break;
+        i3 = i4;
+        s = (s + 4) & 7;
       }
-      *w++ = pt;
-      pt.x += dx[s];
-      pt.y += dy[s];
-      if (i4 == i0 && i3 == i1)
-        break;
-      i3 = i4;
-      s = (s + 4) & 7;
+      b.npts = w - b.pts.data();
+      return miny;
     }
-    npts_ = w - pts_.data();
-  }
 
-  cv::Point *grow(cv::Point *w) {
-    const size_t used = w - pts_.data();
-    pts_.resize(pts_.size() * 2);
-    return pts_.data() + used;
-  }
-
-#ifdef NF_TRACE_STATS
-public:
-  uint64_t stat_scan = 0, stat_trace = 0, stat_contours = 0, stat_steps = 0,
-           stat_small = 0, stat_small_cyc = 0;
-
-private:
-#endif
-  std::vector<cv::Point> pts_; // sized as capacity; npts_ in use
-  size_t npts_ = 0;
-  std::vector<std::pair<size_t, size_t>> kept_;
-  std::vector<uint64_t> ev_;
-  cv::Mat own_nbm_;
-  ptrdiff_t moff_ = 0;
+    static cv::Point *grow(Band &b, cv::Point *w, cv::Point *&wend) {
+      const size_t used = w - b.pts.data();
+      b.pts.resize(b.pts.size() * 2);
+      wend = b.pts.data() + b.pts.size();
+      return b.pts.data() + used;
+    }
+  };
 };
 
 // ---------------------------------------------------------------------------
-// cv::approxPolyDP(closed contour of int points), exact. OpenCV 5's
-// implementation (geometry module) is replicated without the per-call heap
-// buffers, InputArray dispatch and modulo-wrapped point reads; every quantity
-// it computes from integer points is an integer below 2^53, so int64 arithmetic
-// gives identical values, and the eps comparisons keep its double expressions.
-// OpenCV 4 uses a different distance (point-to-line), so there we call it.
+// cv::approxPolyDP(closed contour of int points), exact. OpenCV's
+// implementation is replicated without the per-call heap buffers, InputArray
+// dispatch and modulo-wrapped point reads; every quantity it computes from
+// integer points is an integer below 2^53, so int64 arithmetic gives identical
+// values, and the eps comparisons keep its double expressions. The split step
+// differs between versions: OpenCV 5 (geometry module) measures the distance
+// to the segment, OpenCV 4 (imgproc) to the line through it.
 // ---------------------------------------------------------------------------
 class ApproxPolyDP {
 public:
   // returns the vertices in out (cleared first)
   void run(const cv::Point *src, int count, double eps,
            std::vector<cv::Point> &out) {
-#if CV_VERSION_MAJOR >= 5
     out.resize(count);
     const int n = approx(src, count, eps, out.data());
     out.resize(n);
-#else
-    cv::approxPolyDP(cv::Mat(count, 1, CV_32SC2, const_cast<cv::Point *>(src)),
-                     out, eps, true);
-#endif
   }
 
 private:
@@ -716,6 +772,8 @@ private:
           if (++p >= count)
             p = 0;
           const int64_t ax = pt.x - start_pt.x, ay = pt.y - start_pt.y;
+#if CV_VERSION_MAJOR >= 5
+          // squared distance to the segment, times its squared length
           const int64_t proj = ax * dx + ay * dy;
           int64_t d;
           if (proj < 0) {
@@ -727,6 +785,12 @@ private:
             const int64_t dist = ay * dx - ax * dy;
             d = dist * dist;
           }
+#else
+          // distance to the line times the segment length, squared (same
+          // order as OpenCV 4's |dist|, and its max_dist^2 exactly)
+          const int64_t dist = ay * dx - ax * dy;
+          const int64_t d = dist * dist;
+#endif
           if (d > max_d) {
             max_d = d;
             right_slice.start = (p + count - 1) % count;
@@ -793,6 +857,10 @@ private:
 class FastFractalDetector {
 public:
   DetectorParams params;
+  // true: never split a frame across threads (detect_batch workers, which
+  // already run one frame per core; nested parallel_for_ would run serially
+  // anyway, so splitting would only add band overhead)
+  bool serial = false;
 
   explicit FastFractalDetector(const std::string &config,
                                float marker_size = -1.f)
@@ -893,6 +961,7 @@ private:
     if (scale < 1.f)
       min_contour = std::max(4, int(min_contour * scale + 0.5f));
 
+    thresh_.max_threads = tracer_.max_threads = serial ? 1 : 0;
     thresh_.run(proc_, win, params.adaptive_c, bin_, &nbm_);
     const double rate = params.approx_poly_rate;
     conts_.clear();
@@ -907,7 +976,8 @@ private:
     const int G = (int)groups_.size();
     slots_.resize((size_t)nc * G);
     nslots_.assign(nc, 0);
-    const int nchunks = std::max(1, std::min(nc, 2 * cv::getNumThreads()));
+    const int nchunks =
+        std::max(1, std::min(nc, serial ? 1 : 2 * cv::getNumThreads()));
     if ((int)workers_.size() < nchunks)
       workers_.resize(nchunks);
     if (nc > 0)
