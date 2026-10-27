@@ -21,6 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `n_inliers` and `reproj_err_rel` (error / side of the largest detected
   level in px) (R2, R14).
 
+### Performance
+- `detection_scale` with a factor other than 0.5 / 0.25 (e.g. 0.75, 0.6,
+  0.35) was slower than no scaling: OpenCV's generic `INTER_AREA` path cost
+  ~3 ms single-threaded at 1080p. A separable area resize with the same
+  weights (AVX2 in the x86-64 wheels, parallel row stripes) makes these
+  factors 2.1–2.8× faster; detections are unchanged (bit-identical on the
+  benchmark and robustness scenes; the resized image matches `cv::resize`
+  exactly at 0.75 / 0.6 and within one grey level otherwise) (R3).
+
 ### Changed
 - `estimate_pose` with 8 or more correspondences drops points off by more
   than `max(1.5 px, 3 × median)` once and solves again (if ≥ 8 points and

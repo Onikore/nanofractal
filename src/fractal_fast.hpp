@@ -75,6 +75,141 @@ inline void neighbour_masks(const cv::Mat &bin, cv::Mat &nbm) {
 }
 
 // ---------------------------------------------------------------------------
+// cv::resize(src, dst, Size(), f, f, INTER_AREA) for a factor f whose inverse
+// is not an integer. OpenCV's generic area path walks a list of (dst, src,
+// weight) taps per pixel and costs more than detecting on the full frame
+// (~3 ms single-threaded at 1080p). Same weights (computeResizeAreaTab), but
+// separable: a vertical pass over whole rows (vectorizes), then a horizontal
+// pass with a fixed number of taps per output pixel. Float sums are taken in
+// a different order, so a pixel can differ by one grey level.
+// ---------------------------------------------------------------------------
+class AreaDownscale {
+public:
+  int max_threads = 0; // row stripes; 0 = cv::getNumThreads()
+
+  void run(const cv::Mat &src, double f, cv::Mat &dst) {
+    CV_Assert(src.type() == CV_8UC1 && f > 0 && f < 1);
+    const int dw = cv::saturate_cast<int>(src.cols * f),
+              dh = cv::saturate_cast<int>(src.rows * f);
+    dst.create(dh, dw, CV_8UC1);
+    if (src.cols != sw_ || src.rows != sh_ || f != f_) {
+      sw_ = src.cols;
+      sh_ = src.rows;
+      f_ = f;
+      xt_ = tab(sw_, dw, 1.0 / f, xn_);
+      yt_ = tab(sh_, dh, 1.0 / f, yn_);
+    }
+    int nstripes =
+        max_threads > 0 ? max_threads : std::max(1, cv::getNumThreads());
+    nstripes = std::max(1, std::min(nstripes, dh / 16));
+    if ((int)bufs_.size() < nstripes)
+      bufs_.resize(nstripes);
+    cv::parallel_for_(
+        cv::Range(0, nstripes),
+        [&](const cv::Range &rg) {
+          for (int i = rg.start; i < rg.end; i++)
+            stripe(src, dst, (int)((int64_t)dh * i / nstripes),
+                   (int)((int64_t)dh * (i + 1) / nstripes), bufs_[i]);
+        },
+        nstripes);
+  }
+
+private:
+  // Taps of every output index, padded to the same count n (weight 0), tap
+  // major: tap k of output d is at [k * dsize + d].
+  struct Taps {
+    std::vector<int> si;  // n * dsize source indices
+    std::vector<float> w; // n * dsize weights
+  };
+
+  static Taps tab(int ssize, int dsize, double scale, int &n) {
+    std::vector<std::vector<std::pair<int, float>>> t(dsize);
+    n = 0;
+    for (int dx = 0; dx < dsize; dx++) { // OpenCV's computeResizeAreaTab
+      double fsx1 = dx * scale, fsx2 = fsx1 + scale;
+      double cell = std::min(scale, ssize - fsx1);
+      int sx1 = cvCeil(fsx1), sx2 = cvFloor(fsx2);
+      sx2 = std::min(sx2, ssize - 1);
+      sx1 = std::min(sx1, sx2);
+      if (sx1 - fsx1 > 1e-3)
+        t[dx].push_back({sx1 - 1, (float)((sx1 - fsx1) / cell)});
+      for (int sx = sx1; sx < sx2; sx++)
+        t[dx].push_back({sx, float(1.0 / cell)});
+      if (fsx2 - sx2 > 1e-3)
+        t[dx].push_back(
+            {sx2, (float)(std::min(std::min(fsx2 - sx2, 1.), cell) / cell)});
+      n = std::max(n, (int)t[dx].size());
+    }
+    Taps out;
+    out.si.assign((size_t)dsize * n, 0);
+    out.w.assign((size_t)dsize * n, 0.f);
+    for (int dx = 0; dx < dsize; dx++)
+      for (int k = 0; k < n; k++) { // padding taps read a valid pixel
+        bool real = k < (int)t[dx].size();
+        out.si[(size_t)k * dsize + dx] = t[dx][real ? k : 0].first;
+        out.w[(size_t)k * dsize + dx] = real ? t[dx][k].second : 0.f;
+      }
+    return out;
+  }
+
+  void stripe(const cv::Mat &src, cv::Mat &dst, int y0, int y1,
+              std::vector<float> &buf) const {
+    const int W = src.cols, dh = dst.rows, dw = dst.cols;
+    buf.resize((size_t)W);
+    float *v = buf.data();
+    for (int dy = y0; dy < y1; dy++) {
+      // vertical: v = sum of the source rows of this output row, weighted
+      {
+        const uint8_t *s = src.ptr<uint8_t>(yt_.si[dy]);
+        const float b = yt_.w[dy];
+        for (int x = 0; x < W; x++)
+          v[x] = b * s[x];
+      }
+      for (int k = 1; k < yn_; k++) {
+        const float b = yt_.w[(size_t)k * dh + dy];
+        if (b == 0.f)
+          continue;
+        const uint8_t *s = src.ptr<uint8_t>(yt_.si[(size_t)k * dh + dy]);
+        for (int x = 0; x < W; x++)
+          v[x] += b * s[x];
+      }
+      // horizontal: n taps per output pixel, 8 pixels at a time with AVX2
+      uint8_t *d = dst.ptr<uint8_t>(dy);
+      int dx = 0;
+#if defined(__AVX2__)
+      for (; dx + 8 <= dw; dx += 8) {
+        __m256 a = _mm256_setzero_ps();
+        for (int k = 0; k < xn_; k++) {
+          const size_t o = (size_t)k * dw + dx;
+          const __m256i ix =
+              _mm256_loadu_si256((const __m256i *)(xt_.si.data() + o));
+          a = _mm256_add_ps(a, _mm256_mul_ps(_mm256_loadu_ps(xt_.w.data() + o),
+                                             _mm256_i32gather_ps(v, ix, 4)));
+        }
+        const __m256i r = _mm256_cvtps_epi32(a); // round half to even
+        const __m128i p16 = _mm_packs_epi32(_mm256_castsi256_si128(r),
+                                            _mm256_extracti128_si256(r, 1));
+        _mm_storel_epi64((__m128i *)(d + dx), _mm_packus_epi16(p16, p16));
+      }
+#endif
+      for (; dx < dw; dx++) {
+        float a = 0.f;
+        for (int k = 0; k < xn_; k++) {
+          const size_t o = (size_t)k * dw + dx;
+          a += xt_.w[o] * v[xt_.si[o]];
+        }
+        d[dx] = cv::saturate_cast<uint8_t>(a);
+      }
+    }
+  }
+
+  int sw_ = 0, sh_ = 0, xn_ = 0, yn_ = 0;
+  double f_ = 0;
+  Taps xt_, yt_;
+  std::vector<std::vector<float>> bufs_;
+};
+
+// ---------------------------------------------------------------------------
 // Adaptive threshold (MEAN_C, BINARY_INV) into a zero-bordered 0/1 buffer.
 // ---------------------------------------------------------------------------
 class AdaptiveThreshold {
@@ -946,9 +1081,12 @@ private:
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
     const float inv_scale = 1.f / scale;
-    if (scale < 1.f)
+    if (scale == 0.5f || scale == 0.25f) // integer factors: OpenCV's fast path
       cv::resize(gray_, proc_, cv::Size(), scale, scale, cv::INTER_AREA);
-    else
+    else if (scale < 1.f) {
+      area_.max_threads = serial ? 1 : 0;
+      area_.run(gray_, scale, proc_);
+    } else
       proc_ = gray_;
 
     int win;
@@ -1494,6 +1632,7 @@ private:
   std::vector<Candidate> slots_;
   std::vector<int> nslots_;
   cv::Mat gray_, proc_, bin_, nbm_;
+  AreaDownscale area_;
   std::vector<Candidate> cands_;
   std::vector<cv::Point2f> corners_;
   std::vector<cv::KeyPoint> kpts_, one_;

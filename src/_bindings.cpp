@@ -611,6 +611,26 @@ NB_MODULE(_nanofractal, m) {
       nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
       nb::arg("image"), nb::arg("inner"));
 
+  // Test hook: AreaDownscale vs cv::resize(INTER_AREA) on a grayscale image;
+  // returns (max |difference|, number of differing pixels, same size).
+  m.def("_area_downscale_diff", [](RawArray arr, double f, int threads) {
+    cv::Mat im = as_mat(arr);
+    if (im.channels() != 1)
+      throw nb::value_error("expected a single-channel image");
+    cv::Mat mine, ref;
+    nanofractal_fast::AreaDownscale a;
+    a.max_threads = threads;
+    a.run(im, f, mine);
+    cv::resize(im, ref, cv::Size(), f, f, cv::INTER_AREA);
+    if (mine.size() != ref.size())
+      return nb::make_tuple(255.0, -1, false);
+    cv::Mat d;
+    cv::absdiff(mine, ref, d);
+    double mx = 0;
+    cv::minMaxLoc(d, nullptr, &mx);
+    return nb::make_tuple(mx, cv::countNonZero(d), true);
+  });
+
   // Test hook: trace a 0/1 uint8 image with the parallel band tracer
   // (band_rows rows per band, all threads) and report whether the contours of
   // length >= min_size equal sequential cv::findContours(RETR_LIST, NONE).

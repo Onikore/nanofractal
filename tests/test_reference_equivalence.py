@@ -59,6 +59,9 @@ def test_configs_identical(config, seed):
         dict(subpix_win_size=0),
         dict(subpix_win_size=2),
         dict(detection_scale=0.5),
+        dict(detection_scale=0.25),
+        dict(detection_scale=0.75),  # own INTER_AREA: bit-identical here
+        dict(detection_scale=0.6),
     ],
 )
 def test_params_identical(kw):
@@ -104,3 +107,17 @@ def test_parallel_tracer_matches_findcontours(band_rows):
             assert same, f"image {t} ({h}x{w}), min_size {min_size}"
             total += n
     assert total > 0
+
+
+@pytest.mark.parametrize("threads", [1, 0])
+@pytest.mark.parametrize("size", [(1920, 1080), (1281, 721), (97, 53)])
+@pytest.mark.parametrize("f", [0.75, 0.6, 0.35, 0.3, 0.9, 0.123])
+def test_area_downscale_matches_opencv(f, size, threads):
+    # non-integer detection_scale uses a separable INTER_AREA; it may differ
+    # from cv::resize by one grey level on a few pixels (float sum order)
+    img = generate_scene(max(size[0], 200), max(size[1], 120), "clutter", seed=5)
+    img = np.ascontiguousarray(img[: size[1], : size[0]])
+    mx, n, same_size = _nf._area_downscale_diff(img, f, threads)
+    assert same_size
+    assert mx <= 1
+    assert n <= 0.005 * img.size * f * f

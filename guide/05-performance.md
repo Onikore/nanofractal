@@ -30,22 +30,28 @@ per frame. Measure your own machine with the commands at the end.
 
 Version 0.5 needed 12–14 ms at 1080p and ~50 ms at 4K for the same frames.
 
-## detection_scale: use 0.5 or 0.25
+## detection_scale
 
 `detection_scale` runs the expensive stages (adaptive threshold, contour
 tracing, decoding) on a downscaled copy, then refines the corners on the
 full-resolution image, so accuracy stays sub-pixel as long as the markers stay
-large enough after scaling.
+large enough after scaling. Any value in (0, 1) works; values ≥ 1 (and ≤ 0)
+mean "no scaling".
 
-**Only use 0.5 or 0.25.** OpenCV's area resize has a fast path for integer
-reduction factors only; other factors are slower than not scaling at all:
+4K frame, `FRACTAL_5L_6`, wheels' OpenCV 4.10:
 
-| 4K frame | time | levels found |
-|---|---:|---|
-| 1.0 | 3.7 ms | 0, 1, 2, 3 |
-| 0.75 | 4.3 ms | 0, 1, 2, 3 |
-| **0.5** | **0.94 ms** | 0, 1, 2, 3 |
-| 0.35 | 3.0 ms | 0, 1, 2 |
+| scale | all cores | 1 core | levels found |
+|---|---:|---:|---|
+| 1.0 | 4.3 ms | 12.2 ms | 0, 1, 2, 3 |
+| 0.75 | 2.6 ms | 10.3 ms | 0, 1, 2, 3 |
+| 0.6 | 2.0 ms | 7.6 ms | 0, 1, 2, 3 |
+| **0.5** | **1.4 ms** | **3.6 ms** | 0, 1, 2, 3 |
+| 0.35 | 0.95 ms | 4.0 ms | 0, 1, 2 |
+| 0.25 | 1.1 ms | 4.1 ms | 0, 1, 2 |
+
+0.5 and 0.25 are the cheapest per pixel (whole-pixel averaging); other
+factors use an exact area resize that costs a little more but is never slower
+than not scaling (before 0.6.2 they were).
 
 The price of scaling is range: a level must still be ~50 px wide *after*
 scaling, so the smallest inner levels (and markers far away) drop out first.

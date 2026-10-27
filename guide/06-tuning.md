@@ -17,7 +17,7 @@ Invalid values raise `ValueError` when `detect()` is called.
 
 | field | default | what it does | when to change |
 |---|---|---|---|
-| `detection_scale` | `1.0` | runs threshold + contours + decoding on a downscaled frame; corners are refined at full resolution | ≥ 4K frames: `0.5` (or `0.25`). Only these factors are fast — see [Performance](05-performance.md) |
+| `detection_scale` | `1.0` | runs threshold + contours + decoding on a downscaled frame; corners are refined at full resolution; ≥ 1 or ≤ 0 = off | ≥ 4K frames: `0.5`; any factor in (0, 1) works — see [Performance](05-performance.md) |
 | `adaptive_block_size` | `-1` (auto: `15 · width / 1920`, odd, ≥ 3) | window of the local-mean threshold | strong uneven lighting or very small/large markers relative to the frame. Odd, ≥ 3 |
 | `adaptive_c` | `7.0` | a pixel is "dark" when it is this much darker than its local mean | low contrast (dim light, grey print): lower to 4–5. Many false contours in texture: raise to 9–12 |
 | `min_contour_size` | `-1` (120 px of perimeter) | shorter contours are ignored | rarely: the detection limit for small markers comes from reading their cells, not from this |
