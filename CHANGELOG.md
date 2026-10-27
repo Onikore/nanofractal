@@ -13,10 +13,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reproj_err` / `n_points` scale the measurement noise; `gate` rejects
   outliers by Mahalanobis distance (`last_rejected`, restart after
   `max_rejects`) (R13).
-- `estimate_pose(..., return_method=True)` also returns the method used:
-  `"inner"` or `"corners"`.
+- `estimate_pose(..., full=True)` returns a `Pose` named tuple: `rvec`,
+  `tvec`, `reproj_err`, `method` (`"inner"` / `"corners"`), `n_points`,
+  `n_inliers` and `reproj_err_rel` (error / side of the largest detected
+  level in px) (R2, R14).
 
 ### Changed
+- `estimate_pose` with 8 or more correspondences drops points off by more
+  than `max(1.5 px, 3 × median)` once and solves again (if ≥ 8 points and
+  ≥ 60 % remain); `reproj_err` is then the RMS over the kept points (R14).
+  On noisy synthetic scenes the rotation error fell up to 5× and never grew
+  beyond noise.
 - `PoseSmoother` filters the orientation as a quaternion (tangent-space
   innovation) and keeps the output `rvec` continuous. Near a rotation of π
   (camera looking down at the marker) the component-wise filter averaged

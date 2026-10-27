@@ -229,8 +229,9 @@ struct FractalDetectorImpl {
   // Single fractal-marker pose via solvePnP (IPPE, planar). Uses the rich
   // inner+outer correspondences when available (>=4 points, method "inner");
   // otherwise the corners of every detected level with their real 3D
-  // coordinates from the config (method "corners"). Returns
-  // (rvec(3,), tvec(3,), rms_reproj_px, method), or None when no marker.
+  // coordinates from the config (method "corners"). One outlier pass, then
+  // returns (rvec(3,), tvec(3,), inlier rms px, method, n_points,
+  // n_inliers), or None when no marker.
   nb::object estimate_pose(F32Arr p2d, F32Arr p3d, I32Arr ids, F32Arr corners,
                            F64Arr cam, F64Arr dist, bool fisheye = false) {
     if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
@@ -300,6 +301,7 @@ struct FractalDetectorImpl {
     cv::Mat rvec, tvec;
     double rms = 0;
     bool ok = false;
+    size_t n_inliers = obj.size();
     bool cv_threw = false;
     std::string cv_err;
     {
@@ -317,38 +319,80 @@ struct FractalDetectorImpl {
           img_solve = img;
           dist_solve = distMat;
         }
-        // True image-space RMS error vs the ORIGINAL observations.
-        auto reproj = [&](const cv::Mat &rv, const cv::Mat &tv) {
+        // Per-point image-space errors vs the ORIGINAL observations; returns
+        // their RMS.
+        auto residuals = [&](const std::vector<cv::Point3f> &o,
+                             const std::vector<cv::Point2f> &im,
+                             const cv::Mat &rv, const cv::Mat &tv,
+                             std::vector<double> *err) {
           std::vector<cv::Point2f> proj;
           if (fisheye)
-            cv::fisheye::projectPoints(cv::Mat(obj).reshape(3, (int)obj.size()),
+            cv::fisheye::projectPoints(cv::Mat(o).reshape(3, (int)o.size()),
                                        proj, rv, tv, camMat, distMat);
           else
-            cv::projectPoints(obj, rv, tv, camMat, distMat, proj);
+            cv::projectPoints(o, rv, tv, camMat, distMat, proj);
           double se = 0;
           for (size_t i = 0; i < proj.size(); i++) {
-            double dx = proj[i].x - img[i].x, dy = proj[i].y - img[i].y;
+            double dx = proj[i].x - im[i].x, dy = proj[i].y - im[i].y;
             se += dx * dx + dy * dy;
+            if (err)
+              err->push_back(std::sqrt(dx * dx + dy * dy));
           }
           return std::sqrt(se / (double)proj.size());
         };
-        ok = cv::solvePnP(obj, img_solve, camMat, dist_solve, rvec, tvec, false,
-                          solver);
-        if (ok)
-          rms = reproj(rvec, tvec);
         // IPPE degenerates when the marker faces the camera exactly (it
-        // returns R = I for a rotation of pi): re-solve with SQPNP and keep
-        // the better pose.
-        if (!ok || rms > 1.0) {
-          cv::Mat rv2, tv2;
-          if (cv::solvePnP(obj, img_solve, camMat, dist_solve, rv2, tv2, false,
-                           cv::SOLVEPNP_SQPNP)) {
-            double rms2 = reproj(rv2, tv2);
-            if (!ok || rms2 < rms) {
+        // returns R = I for a rotation of pi): a solution worse than 1 px is
+        // re-solved with SQPNP and the better pose kept.
+        auto solve = [&](const std::vector<cv::Point3f> &o,
+                         const std::vector<cv::Point2f> &im,
+                         const std::vector<cv::Point2f> &ims, int method,
+                         cv::Mat &rv, cv::Mat &tv, double &e) {
+          bool good =
+              cv::solvePnP(o, ims, camMat, dist_solve, rv, tv, false, method);
+          if (good)
+            e = residuals(o, im, rv, tv, nullptr);
+          if (!good || e > 1.0) {
+            cv::Mat rv2, tv2;
+            if (cv::solvePnP(o, ims, camMat, dist_solve, rv2, tv2, false,
+                             cv::SOLVEPNP_SQPNP)) {
+              double e2 = residuals(o, im, rv2, tv2, nullptr);
+              if (!good || e2 < e) {
+                rv = rv2;
+                tv = tv2;
+                e = e2;
+                good = true;
+              }
+            }
+          }
+          return good;
+        };
+        ok = solve(obj, img, img_solve, solver, rvec, tvec, rms);
+        // One outlier pass: drop points off by more than max(1.5 px,
+        // 3 x median) and solve again when enough of them remain.
+        if (ok && obj.size() >= 8) {
+          std::vector<double> err;
+          residuals(obj, img, rvec, tvec, &err);
+          std::vector<double> sorted = err;
+          std::nth_element(sorted.begin(), sorted.begin() + sorted.size() / 2,
+                           sorted.end());
+          double thr = std::max(1.5, 3.0 * sorted[sorted.size() / 2]);
+          std::vector<cv::Point3f> o2;
+          std::vector<cv::Point2f> im2, ims2;
+          for (size_t i = 0; i < err.size(); i++)
+            if (err[i] <= thr) {
+              o2.push_back(obj[i]);
+              im2.push_back(img[i]);
+              ims2.push_back(img_solve[i]);
+            }
+          if (o2.size() < obj.size() && o2.size() >= 8 &&
+              o2.size() * 10 >= obj.size() * 6) {
+            cv::Mat rv2, tv2;
+            double e2 = 0;
+            if (solve(o2, im2, ims2, cv::SOLVEPNP_IPPE, rv2, tv2, e2)) {
               rvec = rv2;
               tvec = tv2;
-              rms = rms2;
-              ok = true;
+              rms = e2;
+              n_inliers = o2.size();
             }
           }
         }
@@ -376,7 +420,8 @@ struct FractalDetectorImpl {
     }
     return nb::make_tuple(make_owned<double>(std::move(r), {(size_t)3}),
                           make_owned<double>(std::move(t), {(size_t)3}), rms,
-                          have_inner ? "inner" : "corners");
+                          have_inner ? "inner" : "corners", (int)obj.size(),
+                          (int)n_inliers);
   }
 
   // Draw detected marker outlines (+ id) and, when axes=true, the pose frame

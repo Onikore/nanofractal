@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterator, Literal, Sequence, overload
+from typing import Iterator, Literal, NamedTuple, Sequence, overload
 
 import numpy as np
 import numpy.typing as npt
@@ -25,6 +25,16 @@ class DetectorParams:
 
     def __init__(self) -> None: ...
     def __repr__(self) -> str: ...
+
+# ── Pose ──────────────────────────────────────────────────────────────────────
+class Pose(NamedTuple):
+    rvec: npt.NDArray[np.float64]
+    tvec: npt.NDArray[np.float64]
+    reproj_err: float
+    method: str
+    n_points: int
+    n_inliers: int
+    reproj_err_rel: float
 
 # ── DetectionResult ───────────────────────────────────────────────────────────
 @dataclass(repr=False)
@@ -74,7 +84,7 @@ class FractalDetector:
         camera_matrix: npt.NDArray[np.float64],
         dist_coeffs: npt.NDArray[np.float64],
         fisheye: bool = ...,
-        return_method: Literal[False] = ...,
+        full: Literal[False] = ...,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float] | None: ...
     @overload
     def estimate_pose(
@@ -84,8 +94,8 @@ class FractalDetector:
         dist_coeffs: npt.NDArray[np.float64],
         fisheye: bool = ...,
         *,
-        return_method: Literal[True],
-    ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64], float, str] | None: ...
+        full: Literal[True],
+    ) -> Pose | None: ...
     def draw(
         self,
         image: npt.NDArray[np.uint8],
@@ -157,6 +167,7 @@ __all__ = [
     "DetectorParams",
     "FractalDetector",
     "FractalTracker",
+    "Pose",
     "PoseSmoother",
     "generate_fractal",
     "refine_corners",

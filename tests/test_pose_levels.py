@@ -36,7 +36,7 @@ def test_only_innermost_level_has_true_scale(marker_size):
     inner_id = max(i for i, *_ in nf._nanofractal._fractal_markers(CONFIG))
     assert res.ids.tolist() == [inner_id]
     cam, dist, z_true = _frontal(img, side)
-    rvec, tvec, err, method = det.estimate_pose(res, cam, dist, return_method=True)
+    rvec, tvec, err, method, *_ = det.estimate_pose(res, cam, dist, full=True)
     assert method == "corners"
     if marker_size > 0:
         assert tvec[2] == pytest.approx(z_true, rel=0.01)
@@ -53,7 +53,7 @@ def test_all_levels_used_without_inner_points():
     res = det.detect(img)
     assert len(res) >= 2
     cam, dist, z_true = _frontal(img, side)
-    rvec, tvec, err, method = det.estimate_pose(res, cam, dist, return_method=True)
+    rvec, tvec, err, method, *_ = det.estimate_pose(res, cam, dist, full=True)
     assert method == "corners"
     assert tvec[2] == pytest.approx(z_true, rel=0.01)
     assert err < 1.0
@@ -70,5 +70,7 @@ def test_method_inner():
     res = det.detect(img, with_inner_points=True)
     assert res.points_2d.shape[0] >= 4
     cam, dist, z_true = _frontal(img, side)
-    *_, method = det.estimate_pose(res, cam, dist, return_method=True)
+    pose = det.estimate_pose(res, cam, dist, full=True)
+    method = pose.method
+    assert pose.n_points == res.points_2d.shape[0]
     assert method == "inner"

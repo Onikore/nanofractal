@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from typing import NamedTuple
 
 import numpy as np
 
@@ -163,6 +164,18 @@ def _draw_target(image: np.ndarray, inplace: bool) -> np.ndarray:
     return np.ascontiguousarray(image).copy()
 
 
+class Pose(NamedTuple):
+    """Full result of ``FractalDetector.estimate_pose(..., full=True)``."""
+
+    rvec: np.ndarray  # float64 (3,), Rodrigues
+    tvec: np.ndarray  # float64 (3,)
+    reproj_err: float  # RMS px over the inliers
+    method: str  # "inner" or "corners"
+    n_points: int  # correspondences used before outlier rejection
+    n_inliers: int  # correspondences kept
+    reproj_err_rel: float  # reproj_err / side (px) of the largest detected level
+
+
 @dataclass(repr=False)
 class DetectionResult:
     ids: np.ndarray  # int32 (N,)
@@ -264,7 +277,7 @@ class FractalDetector:
         camera_matrix: np.ndarray,
         dist_coeffs: np.ndarray,
         fisheye: bool = False,
-        return_method: bool = False,
+        full: bool = False,
     ):
         """Pose of the fractal marker as ``(rvec, tvec, reproj_err)`` or ``None``.
 
@@ -277,8 +290,16 @@ class FractalDetector:
         ``(3,)``; ``reproj_err`` is the RMS reprojection error in pixels (use it
         to gate noisy poses).
 
-        ``return_method=True`` appends the method used: ``"inner"`` or
-        ``"corners"``.
+        With 8 or more correspondences, points off by more than
+        ``max(1.5 px, 3 x median)`` are dropped once and the pose is solved
+        again when at least 8 and 60 % remain; ``reproj_err`` is then over the
+        inliers.
+
+        ``full=True`` returns a :class:`Pose` named tuple instead, adding the
+        method (``"inner"`` / ``"corners"``), the number of points and inliers
+        and ``reproj_err_rel`` -- the error divided by the side in pixels of
+        the largest detected level, a threshold that does not depend on how
+        big the marker is in the frame.
 
         ``fisheye=True`` treats (camera_matrix, dist_coeffs) as the OpenCV fisheye
         model (dist_coeffs must be exactly 4: k1,k2,k3,k4); points are undistorted
@@ -308,9 +329,13 @@ class FractalDetector:
         corners = np.ascontiguousarray(result.corners, dtype=np.float32)
         ids = np.ascontiguousarray(result.ids, dtype=np.int32)
         out = self._d.estimate_pose(p2d, p3d, ids, corners, cam, dist, bool(fisheye))
-        if out is None or return_method:
-            return out
-        return out[:3]
+        if out is None:
+            return None
+        if not full:
+            return out[:3]
+        rvec, tvec, err, method, n_points, n_inliers = out
+        side = float(np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=2).mean(1).max())
+        return Pose(rvec, tvec, err, method, n_points, n_inliers, err / side if side > 0 else 0.0)
 
     def draw(
         self,
@@ -399,6 +424,7 @@ __all__ = [
     "FractalDetector",
     "FractalTracker",
     "generate_fractal",
+    "Pose",
     "PoseSmoother",
     "refine_corners",
     "set_num_threads",

@@ -53,19 +53,46 @@ Without inner points `estimate_pose` uses the four outer corners of **every
 detected level**, each at its real position and size within the marker, so
 the distance is right even when only an inner level is visible (the camera is
 close and the external border is out of frame). You never need to handle the
-"no inner points" case yourself. To see which path was taken, pass
-`return_method=True`:
+"no inner points" case yourself:
 
 ```python
 close = np.ascontiguousarray(page[350:550, 350:550])     # only the inner levels
 Kc = np.array([[900.0, 0, 100], [0, 900.0, 100], [0, 0, 1]])
-rvec, tvec, err, method = det.estimate_pose(det.detect(close), Kc, D, return_method=True)
-print(method, tvec[2])   # "corners", the same distance as for the full page
+p = det.estimate_pose(det.detect(close), Kc, D, full=True)
+print(p.method, p.tvec[2])   # "corners", the same distance as for the full page
 ```
 
-If the solver's first answer reprojects worse than 1 px (OpenCV's IPPE
-degenerates when the marker faces the camera exactly), the pose is solved
-again with `SOLVEPNP_SQPNP` and the better one is returned.
+### Robustness built in
+
+- **Outliers.** With 8 or more correspondences, points whose reprojection
+  error exceeds `max(1.5 px, 3 × median)` are dropped once and the pose is
+  solved again, if at least 8 points and 60 % remain. `reproj_err` is then
+  the RMS over the kept points. With half or more of the points wrong the
+  pass cannot tell good from bad — the large `reproj_err` shows it.
+- **A marker facing the camera exactly** (a camera looking straight down):
+  OpenCV's IPPE solver degenerates there. A first solution worse than 1 px
+  is solved again with `SOLVEPNP_SQPNP` and the better pose is kept.
+
+### `full=True`
+
+`estimate_pose(..., full=True)` returns a `Pose` named tuple:
+
+| field | meaning |
+|---|---|
+| `rvec`, `tvec`, `reproj_err` | as in the default 3-tuple |
+| `method` | `"inner"` (inner + outer points) or `"corners"` (level corners only) |
+| `n_points`, `n_inliers` | correspondences before / after the outlier pass |
+| `reproj_err_rel` | `reproj_err` divided by the side in pixels of the largest detected level |
+
+`reproj_err_rel` is the better quality gate when the marker's size in the
+frame varies a lot (landing, approach): 1 px is a bad pose for a marker 40 px
+wide but excellent for one 800 px wide.
+
+```python
+p = det.estimate_pose(res, K, D, full=True)
+if p is not None and p.reproj_err_rel < 0.005 and p.n_inliers >= 8:
+    rvec, tvec = p.rvec, p.tvec
+```
 
 The correspondences are available if you prefer your own solver:
 
