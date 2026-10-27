@@ -82,8 +82,10 @@
 - [x] Тест: две копии `FRACTAL_3L_6` → флаг `True`, одна → `False`.
 
 ### R1. Колёса для macOS (arm64 + x86_64)
-- [ ] `release.yml`: `macos-14` (arm64), `macos-13` (x86_64); статическая OpenCV;
-      `delocate`; тесты колеса в cibuildwheel.
+- [x] `release.yml`: `macos-14` (arm64), `macos-15-intel` (x86_64; `macos-13`
+      больше нет); статическая OpenCV из `ci/build-opencv.sh`, macOS 11+;
+      тесты колеса в cibuildwheel. В OpenCV на Apple отключён GCD (он
+      игнорирует `setNumThreads`), используется pthreads, как на Linux.
 
 ### R3. `detection_scale` без ловушки нецелых коэффициентов
 Сейчас 0.75 и 0.35 медленнее, чем без масштаба.
@@ -101,8 +103,9 @@
       4 — 32.5). Рекомендация: начинать с половины ядер и мерить.
 
 ### R11a. CI
-- [ ] Колёса для Python 3.14.
-- [ ] Job `ci` под OpenCV 5 (сейчас только системная 4.6).
+- [x] Колёса для Python 3.14. Заодно aarch64 собирается на нативном
+      ARM-раннере (без QEMU) и тестируется на всех версиях Python.
+- [x] Job `ci` под OpenCV 5 (сейчас только системная 4.6).
 
 ---
 

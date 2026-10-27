@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - Wheels for macOS (arm64 and x86_64, macOS 11+) and for CPython 3.14 (R1,
-  R11a).
+  R11a). The bundled OpenCV uses the pthreads backend on macOS as on Linux
+  (its default there, Grand Central Dispatch, ignores `set_num_threads`).
 - `DetectionResult.multiple_instances`: `True` when one marker level is seen
   in two separate places (two copies of the marker in view); detection still
   returns the largest copy of each level (R8a).
