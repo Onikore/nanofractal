@@ -39,8 +39,12 @@ Attributes: `config`, `marker_size`, `params`.
 ## FractalTracker
 
 ```text
-FractalTracker(detector, margin=0.25, pad=16)
+FractalTracker(detector, margin=0.25, pad=16, auto_scale=False, scale_target_px=400)
 ```
+
+`auto_scale=True` shrinks the searched region (`detection_scale`, 1 down to
+0.35) so the largest level of the previous frame is about `scale_target_px`
+wide; only when the detector's own `detection_scale` is 1.
 
 | member | |
 |---|---|

@@ -79,3 +79,36 @@ def test_tracker_restores_auto_block_size():
 def test_tracker_rejects_bad_margin():
     with pytest.raises(ValueError):
         nf.FractalTracker(nf.FractalDetector(CONFIG), margin=-1)
+
+
+def test_auto_scale_keeps_corners():
+    # R6: the region is shrunk (marker 350-515 px, target 200 px -> 0.5 / 0.42
+    # / 0.35) but corners are refined on the full frame: same as full detection
+    frames = _video()
+    full = nf.FractalDetector(CONFIG)
+    det = nf.FractalDetector(CONFIG)
+    tr = nf.FractalTracker(det, auto_scale=True, scale_target_px=200)
+    used = []
+    for f in frames:
+        used.append(tr._scale())
+        a, b = full.detect(f), tr.detect(f)
+        assert 0 in b.ids.tolist()
+        for mid, c in b:
+            np.testing.assert_allclose(c, a.corners[a.ids.tolist().index(mid)], atol=0.05)
+        assert det.params.detection_scale == 1.0 and det.params.adaptive_block_size == -1
+    assert min(used) < 0.6  # the region really was shrunk
+    assert tr.full_frame_detections <= 2
+
+
+def test_auto_scale_off_by_default_and_respects_detector_scale():
+    tr = nf.FractalTracker(nf.FractalDetector(CONFIG))
+    f = _video(n=1)[0]
+    tr.detect(f)
+    assert tr._scale() == 1.0
+    p = nf.DetectorParams()
+    p.detection_scale = 0.5
+    tr2 = nf.FractalTracker(nf.FractalDetector(CONFIG, params=p), auto_scale=True)
+    tr2.detect(f)
+    assert tr2._scale() == 1.0  # the detector's own scale wins
+    with pytest.raises(ValueError):
+        nf.FractalTracker(nf.FractalDetector(CONFIG), scale_target_px=0)

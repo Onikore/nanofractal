@@ -19,6 +19,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers), so `ids` and inner points can grow (R16).
 
 ### Added
+- `FractalTracker(..., auto_scale=True, scale_target_px=400)`: also shrinks
+  the searched region from the previous marker size (down to 0.35); corners
+  are refined on the full frame and stay as accurate. 4K synthetic video:
+  ×5.7 vs `detect` on one core (plain tracker ×2.5), ×3.9 on all cores (R6).
 - `DetectionResult.points_level`: the level id of every inner point
   (`detect(..., with_inner_points=True)`), int32 `(M,)` (R19).
 - Level consistency check: the homography of a larger level predicts the
@@ -58,6 +62,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be faster (Raspberry Pi 5 numbers) — `guide/05`, README (R15).
 
 ### Performance
+- aarch64: NEON version of the contour-start scan (it had an AVX2 path
+  only). GitHub ARM runner, one core: `detect` 1.4–1.85× faster than the
+  scalar build, results bit-identical (R4).
 - `detection_scale` with a factor other than 0.5 / 0.25 (e.g. 0.75, 0.6,
   0.35) was slower than no scaling: OpenCV's generic `INTER_AREA` path cost
   ~3 ms single-threaded at 1080p. A separable area resize with the same

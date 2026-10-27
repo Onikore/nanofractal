@@ -32,6 +32,27 @@ tracker.reset()                            # e.g. after a scene cut
 
 `tracker.detect(frame, with_inner_points=True)` works the same way for pose.
 
+### Shrinking the region (`auto_scale`)
+
+With `auto_scale=True` the tracker also sets `detection_scale` for the region
+from the previous frame: the largest level is shrunk to about
+`scale_target_px` (400 by default) pixels, in a few fixed steps down to 0.35.
+Corners are still refined on the full-resolution frame, so they stay as
+accurate as without scaling; the smallest inner levels may drop out of
+`ids` (inner points of every level are still found). On a 4K video of a
+moving 500–1200 px marker: **3.7 ms per frame instead of 21 ms on one core
+(×5.7; the plain tracker ×2.5), ×3.9 on all cores**, outer corners as
+accurate as full detection (largest error against the true corners 0.517 px
+vs 0.518 px).
+
+```python
+tracker = nf.FractalTracker(det, auto_scale=True)
+for i in range(3):
+    frame = np.full((720, 1280), 255, np.uint8)
+    frame[200:500, 100 + 60 * i:400 + 60 * i] = marker
+    print(i, tracker.detect(frame).ids.tolist())
+```
+
 ## A camera loop
 
 ```python

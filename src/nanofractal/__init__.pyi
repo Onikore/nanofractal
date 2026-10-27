@@ -141,8 +141,17 @@ class FractalTracker:
     margin: float
     pad: int
     full_frame_detections: int
+    auto_scale: bool
+    scale_target_px: float
 
-    def __init__(self, detector: FractalDetector, margin: float = ..., pad: int = ...) -> None: ...
+    def __init__(
+        self,
+        detector: FractalDetector,
+        margin: float = ...,
+        pad: int = ...,
+        auto_scale: bool = ...,
+        scale_target_px: float = ...,
+    ) -> None: ...
     def reset(self) -> None: ...
     def detect(
         self, image: npt.NDArray[np.uint8], with_inner_points: bool = ...

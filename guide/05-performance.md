@@ -9,6 +9,7 @@ per frame. Measure your own machine with the commands at the end.
 | situation | do this | why |
 |---|---|---|
 | live video, one camera | `FractalTracker(detector)`, default threads | searches near the last detection: ~2× at 4K; all cores inside each frame |
+| live 4K video, marker not tiny | `FractalTracker(detector, auto_scale=True)` | also shrinks the region from the last marker size: ×3.9 (all cores) to ×5.7 (1 core) at 4K, same corners |
 | 4K (or larger) frames, marker not tiny | `params.detection_scale = 0.5` | threshold/contours on a quarter of the pixels; corners still refined at full resolution |
 | several cameras / streams at once | `nf.set_num_threads(1)`, one detector (or tracker) per stream | streams run in parallel instead of competing for cores |
 | a folder of images / recorded video | `detector.detect_batch(frames)` | one frame per core, best throughput |
