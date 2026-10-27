@@ -97,8 +97,10 @@ copy = det.draw(page, res, inplace=False)               # draw on a copy
 ## Smoothing a pose stream
 
 Per-frame poses jitter by a fraction of a pixel's worth of angle.
-`PoseSmoother` filters each of the 6 components (a scalar Kalman filter or
-an equivalent fixed-gain EMA):
+`PoseSmoother` filters the pose with a Kalman filter (or an equivalent
+fixed-gain EMA, `mode="ema"`). The orientation is kept as a quaternion, so a
+camera looking straight down at the marker (rotation ≈ π, where OpenCV's
+`rvec` flips sign from frame to frame) gives a smooth, continuous `rvec`.
 
 ```python
 smoother = nf.PoseSmoother(process_noise=1e-4, measurement_noise=1e-2)  # mode="kalman"
@@ -108,6 +110,25 @@ smoother.reset()   # call when the marker is lost for a while
 ```
 
 Raise `process_noise` (or lower `measurement_noise`) to follow fast motion
-with less lag; lower it for steadier output. Rotations are smoothed
-component-wise, which is accurate for the small frame-to-frame changes of a
-video stream.
+with less lag; lower it for steadier output.
+
+**For control loops pass the frame time.** With `t` (seconds) the filter uses
+the real interval between frames (dropped frames are handled) and a
+constant-velocity model, so a moving marker is followed without lag; here
+`process_noise` is per second. Pass `reproj_err` and the number of points to
+trust good poses more, and `gate` to drop outliers:
+
+```python
+smoother = nf.PoseSmoother(process_noise=1e-3, measurement_noise=1e-4, gate=4.7)
+for i in range(5):
+    t = i / 30                                         # e.g. the capture timestamp
+    rvec_s, tvec_s = smoother.update(rvec, tvec, t=t, reproj_err=err, n_points=len(res.points_2d))
+    if smoother.last_rejected:
+        pass                                           # outlier: the prediction was returned
+```
+
+With `reproj_err` / `n_points`, `measurement_noise` is the variance of a
+4-corner pose at 1 px RMS; it is scaled by `reproj_err**2 * 4 / n_points`.
+A measurement farther than `gate` (Mahalanobis distance; 4.7 ≈ 99.9 % for 6
+components) from the prediction is rejected; after `max_rejects=3` rejections
+in a row the filter restarts from the measurement.

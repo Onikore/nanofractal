@@ -118,11 +118,18 @@ class PoseSmoother:
         process_noise: float = ...,
         measurement_noise: float = ...,
         mode: str = ...,
+        gate: float | None = ...,
+        max_rejects: int = ...,
     ) -> None: ...
+    @property
+    def last_rejected(self) -> bool: ...
     def update(
         self,
         rvec: npt.ArrayLike,
         tvec: npt.ArrayLike,
+        t: float | None = ...,
+        reproj_err: float | None = ...,
+        n_points: int | None = ...,
     ) -> tuple[npt.NDArray[np.float64], npt.NDArray[np.float64]]: ...
     def reset(self) -> None: ...
 

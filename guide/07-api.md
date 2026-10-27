@@ -70,7 +70,7 @@ Fields `min_contour_size`, `adaptive_block_size`, `adaptive_c`,
 | `generate_fractal(config, size_px=400, nested=True)` | uint8 `(size_px, size_px)` marker image |
 | `refine_corners(image, corners, win_size=5)` | float32 `(N, 4, 2)` refined corners |
 | `set_num_threads(n)` / `get_num_threads()` | threads per `detect()` call (`n <= 0`: all cores) |
-| `PoseSmoother(process_noise=1e-4, measurement_noise=1e-2, mode="kalman")` | `.update(rvec, tvec) -> (rvec, tvec)`, `.reset()`; `mode="ema"` for a fixed gain |
+| `PoseSmoother(process_noise=1e-4, measurement_noise=1e-2, mode="kalman", gate=None, max_rejects=3)` | `.update(rvec, tvec, t=None, reproj_err=None, n_points=None) -> (rvec, tvec)`, `.reset()`, `.last_rejected`; `mode="ema"` for a fixed gain |
 
 `nanofractal.__version__` is the package version.
 

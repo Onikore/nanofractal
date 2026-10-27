@@ -8,8 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `PoseSmoother.update(..., t=seconds)`: real time steps and a
+  constant-velocity model (no lag on steady motion, dropped frames handled);
+  `reproj_err` / `n_points` scale the measurement noise; `gate` rejects
+  outliers by Mahalanobis distance (`last_rejected`, restart after
+  `max_rejects`) (R13).
 - `estimate_pose(..., return_method=True)` also returns the method used:
   `"inner"` or `"corners"`.
+
+### Changed
+- `PoseSmoother` filters the orientation as a quaternion (tangent-space
+  innovation) and keeps the output `rvec` continuous. Near a rotation of π
+  (camera looking down at the marker) the component-wise filter averaged
+  `rvec` values of opposite sign into garbage. Without the new arguments the
+  results differ from 0.6.1 only by rounding-level amounts (< 1e-3 rad).
 
 ### Fixed
 - `estimate_pose` without inner points treated the first detected level as

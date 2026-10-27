@@ -36,6 +36,8 @@ tracker.reset()                            # e.g. after a scene cut
 
 ```python
 # requires: cv2 and a camera
+import time
+
 import cv2
 import nanofractal as nf
 
@@ -44,20 +46,22 @@ cap.set(cv2.CAP_PROP_FRAME_WIDTH, 1920)
 cap.set(cv2.CAP_PROP_FRAME_HEIGHT, 1080)
 det = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.20)
 tracker = nf.FractalTracker(det)
-smoother = nf.PoseSmoother()
+smoother = nf.PoseSmoother(process_noise=1e-3, measurement_noise=1e-4, gate=4.7)
 K, D = ..., ...                      # your calibration
 
 while True:
     ok, frame = cap.read()
     if not ok:
         break
+    t = time.monotonic()                             # frame time, seconds
     gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)   # or pass `frame` (BGR) directly
     res = tracker.detect(gray, with_inner_points=True)
     pose = det.estimate_pose(res, K, D)
     if pose is None:
         smoother.reset()
     elif pose[2] < 2.0:                              # gate on reprojection error
-        rvec, tvec = smoother.update(pose[0], pose[1])
+        rvec, tvec = smoother.update(pose[0], pose[1], t=t, reproj_err=pose[2],
+                                     n_points=len(res.points_2d))
         det.draw(frame, res, K, D, rvec, tvec)
     cv2.imshow("nanofractal", frame)
     if cv2.waitKey(1) == 27:
