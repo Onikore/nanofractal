@@ -50,8 +50,12 @@ def test_false_level_elsewhere_dropped(inner):
     assert res.ids.tolist() == [0, 2]
     assert res.multiple_instances
     if inner:
-        assert det.estimate_pose(res, np.array([[800.0, 0, 400], [0, 800, 200], [0, 0, 1]]),
-                                 np.zeros(5))[2] < 1.0
+        assert (
+            det.estimate_pose(
+                res, np.array([[800.0, 0, 400], [0, 800, 200], [0, 0, 1]]), np.zeros(5)
+            )[2]
+            < 1.0
+        )
 
 
 def test_batch_and_diagnose_report_it():
@@ -62,3 +66,29 @@ def test_batch_and_diagnose_report_it():
     d = det.diagnose(page)
     assert d.result.inconsistent_ids.tolist() == [1]
     assert [q.nearest_id for q in d.quads if q.reason == "inconsistent"] == [1]
+
+
+@pytest.mark.parametrize("config", ["FRACTAL_3L_6", "FRACTAL_5L_6"])
+def test_points_level(config):
+    # R19: the level of every inner point; a point sitting on a level's outer
+    # corner is labelled with that level
+    from nanofractal.bench import generate_scene
+
+    det = nf.FractalDetector(config, marker_size=0.2)
+    res = det.detect(
+        generate_scene(1280, 720, "perspective", config=config), with_inner_points=True
+    )
+    assert res.points_level is not None
+    assert res.points_level.dtype == np.int32
+    assert res.points_level.shape == (res.points_2d.shape[0],)
+    assert set(res.points_level.tolist()) <= set(res.ids.tolist())
+    checked = 0
+    for mid, corners in res:
+        assert (res.points_level == mid).sum() >= 1
+        for c in corners:
+            d = np.linalg.norm(res.points_2d - c, axis=1)
+            if d.min() < 0.5:
+                assert res.points_level[d.argmin()] == mid
+                checked += 1
+    assert checked >= 3 * len(res)
+    assert nf.FractalDetector(config).detect(generate_scene(640, 480, "clean")).points_level is None

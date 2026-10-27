@@ -98,6 +98,15 @@ The correspondences are available if you prefer your own solver:
 
 ```python
 print(res.points_2d.shape, res.points_3d.shape)   # (M,2) pixels, (M,3) metres, z = 0
+print(res.points_level[:8])                       # (M,) level id of each point
+```
+
+`points_level` says which level each point belongs to — e.g. to weight the
+small inner levels differently, or to solve from one level only:
+
+```python
+inner = res.points_level == res.ids.max()          # the innermost level found
+print(inner.sum(), "points on level", res.ids.max())
 ```
 
 ## Fisheye lenses

@@ -86,9 +86,11 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
                              std::vector<float> &&corners,
                              const std::vector<cv::Point2f> &p2d,
                              const std::vector<cv::Point3f> &p3d, float ox,
-                             float oy, bool multiple, nb::object dropped) {
+                             float oy, bool multiple, nb::object dropped,
+                             const std::vector<int> &levels) {
   size_t n = ids.size();
   size_t m2 = p2d.size();
+  std::vector<int32_t> lv(levels.begin(), levels.end());
   std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
   for (size_t i = 0; i < m2; i++) {
     pts2[i * 2 + 0] = p2d[i].x + ox;
@@ -97,10 +99,11 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
     pts3[i * 3 + 1] = p3d[i].y;
     pts3[i * 3 + 2] = p3d[i].z;
   }
-  return nb::make_tuple(
-      ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
-      make_owned<float>(std::move(pts2), {m2, (size_t)2}),
-      make_owned<float>(std::move(pts3), {m2, (size_t)3}), multiple, dropped);
+  return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                        corners_to_numpy(std::move(corners), n),
+                        make_owned<float>(std::move(pts2), {m2, (size_t)2}),
+                        make_owned<float>(std::move(pts3), {m2, (size_t)3}),
+                        multiple, dropped, ids_to_numpy(std::move(lv)));
 }
 
 struct FractalDetectorImpl {
@@ -221,7 +224,8 @@ struct FractalDetectorImpl {
     std::vector<float> corners;
     fill(markers, ids, corners, ox, oy);
     return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy,
-                       d.multiple_instances(), dropped_ids(d));
+                       d.multiple_instances(), dropped_ids(d),
+                       d.points_level());
   }
 
   // Parallel batch detection. The detector is not thread-safe, so each worker
@@ -664,7 +668,8 @@ NB_MODULE(_nanofractal, m) {
         std::vector<float> corners;
         fill(det, ids, corners);
         return full_result(std::move(ids), std::move(corners), p2d, p3d, 0.f,
-                           0.f, false, nb::cast(ids_to_numpy({})));
+                           0.f, false, nb::cast(ids_to_numpy({})),
+                           std::vector<int>(p2d.size(), -1));
       },
       nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
       nb::arg("image"), nb::arg("inner"));

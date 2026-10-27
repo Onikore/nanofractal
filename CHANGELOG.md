@@ -19,6 +19,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers), so `ids` and inner points can grow (R16).
 
 ### Added
+- `DetectionResult.points_level`: the level id of every inner point
+  (`detect(..., with_inner_points=True)`), int32 `(M,)` (R19).
 - Level consistency check: the homography of a larger level predicts the
   corners of each smaller one; a level found elsewhere (more than half its
   side away) is dropped and listed in `DetectionResult.inconsistent_ids`

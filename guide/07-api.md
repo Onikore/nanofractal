@@ -56,6 +56,7 @@ FractalTracker(detector, margin=0.25, pad=16)
 | `corners` | float32 `(N, 4, 2)` — marker TL, TR, BR, BL in pixels |
 | `points_2d` | float32 `(M, 2)` or `None` — inner+outer image points |
 | `points_3d` | float32 `(M, 3)` or `None` — matching marker points, z = 0 |
+| `points_level` | int32 `(M,)` or `None` — level id of each point |
 | `multiple_instances` | `bool` — a level was seen in two separate places (two copies of the marker); only the largest of each level is returned |
 | `inconsistent_ids` | int32 `(K,)` — levels dropped because they are not where the other levels put them |
 

@@ -190,6 +190,8 @@ class DetectionResult:
     # Levels found but dropped because their position does not fit the other
     # levels of the marker (a false candidate with a valid id elsewhere).
     inconsistent_ids: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
+    # Level id of every row of points_2d / points_3d (with_inner_points only).
+    points_level: np.ndarray | None = None  # int32 (M,)
 
     def __len__(self) -> int:
         return int(self.ids.shape[0])
@@ -283,13 +285,13 @@ class FractalDetector:
         if roi is not None:
             rx, ry, rw, rh = _validate_roi(roi, image)
             if with_inner_points:
-                ids, corners, p2d, p3d, multi, drop = self._d.detect_full(image, rx, ry, rw, rh)
-                return DetectionResult(ids, corners, p2d, p3d, multi, drop)
+                ids, corners, p2d, p3d, multi, drop, lv = self._d.detect_full(image, rx, ry, rw, rh)
+                return DetectionResult(ids, corners, p2d, p3d, multi, drop, lv)
             ids, corners, multi, drop = self._d.detect(image, rx, ry, rw, rh)
         else:
             if with_inner_points:
-                ids, corners, p2d, p3d, multi, drop = self._d.detect_full(image)
-                return DetectionResult(ids, corners, p2d, p3d, multi, drop)
+                ids, corners, p2d, p3d, multi, drop, lv = self._d.detect_full(image)
+                return DetectionResult(ids, corners, p2d, p3d, multi, drop, lv)
             ids, corners, multi, drop = self._d.detect(image)
         return DetectionResult(
             ids=ids, corners=corners, multiple_instances=multi, inconsistent_ids=drop

@@ -167,7 +167,7 @@
       (`tests/test_level_consistency.py`).
 
 ### R19. Метка уровня для каждой точки `[ext P2-3]`
-- [ ] `DetectionResult.points_level` — int32 `(M,)`, id уровня для каждой точки
+- [x] `DetectionResult.points_level` — int32 `(M,)`, id уровня для каждой точки
       `points_2d`/`points_3d`.
 
 ### R4. NEON для aarch64

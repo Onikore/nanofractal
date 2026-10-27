@@ -1039,6 +1039,7 @@ public:
               std::vector<cv::Point3f> &p3d, std::vector<cv::Point2f> &p2d) {
     to_gray(img);
     detect_gray(out);
+    plevel_.clear();
     if (!out.empty())
       inner_points(out, p3d, p2d);
   }
@@ -1052,6 +1053,9 @@ public:
   // Ids of levels the last detection dropped because their position does not
   // agree with the other levels of the marker (see check_levels()).
   const std::vector<int> &inconsistent_ids() const { return dropped_; }
+
+  // Level id of every inner point of the last detect(..., p3d, p2d) call.
+  const std::vector<int> &points_level() const { return plevel_; }
 
   // Debug aid: why each quad of the last detection was kept or dropped.
   enum Reason { kAccepted = 0, kDuplicate, kBorder, kBits, kInconsistent };
@@ -1718,6 +1722,7 @@ private:
   void inner_points(const std::vector<Detection> &det,
                     std::vector<cv::Point3f> &p3d,
                     std::vector<cv::Point2f> &p2d) {
+    plevel_.clear();
     std::vector<cv::Point2f> imgpoints;
     std::vector<cv::Point3f> objpoints;
     for (const Detection &m : det) {
@@ -1790,6 +1795,7 @@ private:
           if (hit >= 0 && keypoint_class(hit) == okp[idx].class_id) {
             p2d.push_back(kpts_[hit].pt);
             p3d.push_back(cv::Point3f(pr.obj[idx].x, pr.obj[idx].y, 0));
+            plevel_.push_back(pr.id);
           }
         }
       } else {
@@ -1799,6 +1805,7 @@ private:
             for (int c = 0; c < 4; c++) {
               p3d.push_back(cv::Point3f(kp[c].pt.x, kp[c].pt.y, 0));
               p2d.push_back(m.corners[c]);
+              plevel_.push_back(m.id);
             }
             break;
           }
@@ -1994,6 +2001,7 @@ private:
   bool multiple_ = false;
   float scale_ = 1.f;
   std::vector<int> dropped_; // levels removed by check_levels()
+  std::vector<int> plevel_;  // level of each inner point
   nanofractal::FractalMarkerSet set_;
   std::vector<Group> groups_;
   AdaptiveThreshold thresh_;
