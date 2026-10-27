@@ -211,6 +211,40 @@ class DetectionResult:
         return f"DetectionResult(n={n}, ids={ids_str})"
 
 
+class QuadInfo(NamedTuple):
+    """One convex quad seen by ``FractalDetector.diagnose``."""
+
+    corners: np.ndarray  # float32 (4, 2), image px, before sub-pixel refinement
+    reason: str  # "accepted", "duplicate", "border" or "bits"
+    cells: int  # grid size (border included) of the closest code
+    nearest_id: int  # id of the closest code
+    border_errors: int  # border cells read as white (must all be black)
+    bit_errors: int  # inner bits that differ from nearest_id (best rotation)
+    contrast: float  # mean bright cell minus mean dark cell (grey levels)
+
+
+@dataclass(repr=False)
+class Diagnosis:
+    """Result of ``FractalDetector.diagnose``: the detection plus every quad."""
+
+    result: DetectionResult
+    n_contours: int  # contours traced (at least min_contour_size long)
+    n_not_quad: int  # of those, not a convex quadrilateral
+    quads: list[QuadInfo]
+
+    def __repr__(self) -> str:
+        counts: dict[str, int] = {}
+        for q in self.quads:
+            counts[q.reason] = counts.get(q.reason, 0) + 1
+        return (
+            f"Diagnosis(ids={self.result.ids.tolist()}, contours={self.n_contours}, "
+            f"not_quad={self.n_not_quad}, quads={counts})"
+        )
+
+
+_REASONS = ("accepted", "duplicate", "border", "bits")
+
+
 _FRACTAL_CONFIGS = {"FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"}
 
 
@@ -255,6 +289,50 @@ class FractalDetector:
                 return DetectionResult(ids, corners, p2d, p3d, multi)
             ids, corners, multi = self._d.detect(image)
         return DetectionResult(ids=ids, corners=corners, multiple_instances=multi)
+
+    def diagnose(
+        self,
+        image: np.ndarray,
+        roi: "tuple[int, int, int, int] | None" = None,
+    ) -> Diagnosis:
+        """Detect, and report why every candidate quad was kept or dropped.
+
+        A debug aid for frames where a visible marker is not found: each
+        convex quad is listed with its reason (``"accepted"``,
+        ``"duplicate"`` -- a smaller copy of a level already found,
+        ``"border"`` -- the black frame did not read black, ``"bits"`` -- the
+        frame is fine but no code matched), the grid size and code it came
+        closest to, how many cells were wrong and the cell contrast. A quad
+        one or two bits away from a real id is a reading problem (blur,
+        shadow, too few pixels per cell); many wrong bits mean it is not the
+        marker. Contours that are not a convex quad are only counted. Slower
+        than :meth:`detect` and the detection is the same.
+        """
+        _validate_params(self._d.params)
+        if roi is not None:
+            rx, ry, rw, rh = _validate_roi(roi, image)
+            out = self._d.diagnose(image, rx, ry, rw, rh)
+        else:
+            out = self._d.diagnose(image)
+        ids, corners, multi, n_cont, n_nq, qc, cells, reason, border, bits, near, con = out
+        quads = [
+            QuadInfo(
+                qc[i],
+                _REASONS[int(reason[i])],
+                int(cells[i]),
+                int(near[i]),
+                int(border[i]),
+                int(bits[i]),
+                float(con[i]),
+            )
+            for i in range(len(reason))
+        ]
+        return Diagnosis(
+            DetectionResult(ids=ids, corners=corners, multiple_instances=multi),
+            int(n_cont),
+            int(n_nq),
+            quads,
+        )
 
     def detect_batch(
         self,
@@ -423,11 +501,13 @@ from .tracker import FractalTracker  # noqa: E402
 __all__ = [
     "__version__",
     "DetectionResult",
+    "Diagnosis",
     "DetectorParams",
     "FractalDetector",
     "FractalTracker",
     "generate_fractal",
     "Pose",
+    "QuadInfo",
     "PoseSmoother",
     "refine_corners",
     "set_num_threads",

@@ -17,6 +17,7 @@ FractalDetector(config, marker_size=-1.0, params=None)
 | method | returns |
 |---|---|
 | `detect(image, with_inner_points=False, roi=None)` | `DetectionResult` |
+| `diagnose(image, roi=None)` | `Diagnosis(result, n_contours, n_not_quad, quads)` — see [Troubleshooting](08-troubleshooting.md#why-a-candidate-was-dropped) |
 | `detect_batch(images, num_threads=0, roi=None)` | `list[DetectionResult]` (no inner points) |
 | `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False, full=False)` | `(rvec, tvec, reproj_err)`, a `Pose` with `full=True`, or `None` |
 | `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None, inplace=True)` | the image drawn on |
@@ -58,6 +59,22 @@ FractalTracker(detector, margin=0.25, pad=16)
 | `multiple_instances` | `bool` — a level was seen in two separate places (two copies of the marker); only the largest of each level is returned |
 
 `len(r)`, `bool(r)`, `for level_id, corners in r`, readable `repr`.
+
+## Diagnosis
+
+| attribute | type |
+|---|---|
+| `result` | the `DetectionResult` (same as `detect`) |
+| `n_contours` | contours traced (at least `min_contour_size` long) |
+| `n_not_quad` | of those, not a convex quadrilateral |
+| `quads` | `list[QuadInfo]` |
+
+`QuadInfo(corners, reason, cells, nearest_id, border_errors, bit_errors,
+contrast)`: corners float32 `(4, 2)` before sub-pixel refinement; `reason`
+one of `"accepted"`, `"duplicate"`, `"border"`, `"bits"`; `cells` the grid
+size (border included) and `nearest_id` the code it came closest to;
+`border_errors` frame cells read white; `bit_errors` inner bits that differ
+from `nearest_id`; `contrast` mean bright minus mean dark cell (grey levels).
 
 ## DetectorParams
 

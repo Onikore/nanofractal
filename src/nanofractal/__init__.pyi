@@ -50,6 +50,25 @@ class DetectionResult:
     def __iter__(self) -> Iterator[tuple[int, npt.NDArray[np.float32]]]: ...
     def __repr__(self) -> str: ...
 
+# ── Diagnosis ─────────────────────────────────────────────────────────────────
+class QuadInfo(NamedTuple):
+    corners: npt.NDArray[np.float32]
+    reason: str
+    cells: int
+    nearest_id: int
+    border_errors: int
+    bit_errors: int
+    contrast: float
+
+@dataclass(repr=False)
+class Diagnosis:
+    result: DetectionResult
+    n_contours: int
+    n_not_quad: int
+    quads: list[QuadInfo]
+
+    def __repr__(self) -> str: ...
+
 # ── FractalDetector ───────────────────────────────────────────────────────────
 class FractalDetector:
     config: str
@@ -72,6 +91,11 @@ class FractalDetector:
         with_inner_points: bool = ...,
         roi: tuple[int, int, int, int] | None = ...,
     ) -> DetectionResult: ...
+    def diagnose(
+        self,
+        image: npt.NDArray[np.uint8],
+        roi: tuple[int, int, int, int] | None = ...,
+    ) -> Diagnosis: ...
     def detect_batch(
         self,
         images: Sequence[npt.NDArray[np.uint8]],
@@ -165,11 +189,13 @@ def refine_corners(
 __all__ = [
     "__version__",
     "DetectionResult",
+    "Diagnosis",
     "DetectorParams",
     "FractalDetector",
     "FractalTracker",
     "Pose",
     "PoseSmoother",
+    "QuadInfo",
     "generate_fractal",
     "refine_corners",
     "set_num_threads",

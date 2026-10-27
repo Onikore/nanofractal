@@ -33,6 +33,35 @@ overlay = det.draw(frame, res, inplace=False)
 print(res, overlay.shape)       # save `overlay` and inspect it
 ```
 
+### Why a candidate was dropped
+
+`diagnose` runs the same detection and lists every convex quad it looked at,
+with the reason it was kept or dropped and how close it came to a real code:
+
+```python
+frame = np.full((600, 600), 255, np.uint8)
+frame[100:500, 100:500] = nf.generate_fractal("FRACTAL_5L_6", 400)
+frame[136:156, 186:206] ^= 255           # damage one cell of the outer level
+d = det.diagnose(frame)
+print(d)                                 # counts by reason
+for q in d.quads:
+    if q.reason in ("border", "bits") and q.bit_errors <= 3:
+        print(q.nearest_id, q.bit_errors, q.contrast)   # nearly a marker
+```
+
+| `reason` | meaning |
+|---|---|
+| `"accepted"` | decoded and returned |
+| `"duplicate"` | decoded, but a larger quad of the same level was kept (the same square traced twice, or a second copy of the marker) |
+| `"border"` | some cells of the black frame read white |
+| `"bits"` | the frame is black, but no code matches |
+
+A quad of the marker's size that misses its id by one to three bits
+(`bit_errors`) is a reading problem: too few pixels per cell, blur, or a
+shadow edge across it (low `contrast`). Quads with many wrong bits are other
+squares in the scene. Contours shorter than `min_contour_size` are not
+listed; `n_not_quad` counts the ones that are not a convex quad.
+
 ## The pose jumps or is wrong
 
 - Check `reproj_err`: above ~2 px the correspondences or the intrinsics are

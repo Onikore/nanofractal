@@ -26,6 +26,7 @@
 #include "nanofractal.h"
 
 #include <algorithm>
+#include <climits>
 #include <cmath>
 #include <cstdint>
 #include <cstring>
@@ -1047,6 +1048,67 @@ public:
   // (two copies of the marker); only the largest of each id is returned.
   bool multiple_instances() const { return multiple_; }
 
+  // Debug aid: why each quad of the last detection was kept or dropped.
+  enum Reason { kAccepted = 0, kDuplicate, kBorder, kBits };
+  struct QuadInfo {
+    cv::Point2f c[4]; // image coordinates, unrefined
+    int cells;        // grid size (with border) of the closest match
+    int reason;       // Reason
+    int border_errors, bit_errors; // white border cells; wrong inner bits
+    int nearest_id;                // code with the fewest wrong bits
+    float contrast; // mean of the bright cells minus mean of the dark ones
+  };
+
+  // Re-examines the contours of the last detect() call, serially, and reports
+  // every convex quad with the grid size and code it came closest to. The
+  // detection itself is untouched. Contours shorter than min_contour_size are
+  // not seen here; n_not_quad counts those that are not a convex quad.
+  void diagnose(std::vector<QuadInfo> &quads, int &n_contours,
+                int &n_not_quad) {
+    quads.clear();
+    n_contours = (int)conts_.size();
+    n_not_quad = 0;
+    const float inv_scale = 1.f / scale_;
+    ApproxPolyDP dp;
+    std::vector<cv::Point> approx;
+    std::vector<Candidate> dec(groups_.size());
+    for (const auto &ct : conts_) {
+      dp.run(ct.first, ct.second, double(ct.second) * params.approx_poly_rate,
+             approx);
+      if (approx.size() != 4 || !cv::isContourConvex(approx)) {
+        n_not_quad++;
+        continue;
+      }
+      QuadInfo q{};
+      const int nd = decode(approx, dec.data());
+      if (nd > 0) {
+        bool kept = false;
+        for (int d = 0; d < nd && !kept; d++) {
+          cv::Point2f c[4];
+          for (int k = 0; k < 4; k++)
+            c[k] = scale_ < 1.f ? dec[d].c[k] * inv_scale : dec[d].c[k];
+          for (const Candidate &m : cands_)
+            if (m.id == dec[d].id && std::equal(c, c + 4, m.c))
+              kept = true;
+        }
+        const Candidate &d0 = dec[0];
+        for (int k = 0; k < 4; k++)
+          q.c[k] = d0.c[k] * inv_scale;
+        q.reason = kept ? kAccepted : kDuplicate;
+        q.nearest_id = d0.id;
+        for (const Group &g : groups_)
+          for (const Code &code : g.codes)
+            if (code.id == d0.id)
+              q.cells = g.n;
+        examine(approx, q, false);
+      } else {
+        examine(approx, q, true);
+        q.reason = q.border_errors > 0 ? kBorder : kBits;
+      }
+      quads.push_back(q);
+    }
+  }
+
 private:
   struct Code {
     int id;
@@ -1080,6 +1142,7 @@ private:
     float scale = params.detection_scale;
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
+    scale_ = scale;
     const float inv_scale = 1.f / scale;
     if (scale == 0.5f || scale == 0.25f) // integer factors: OpenCV's fast path
       cv::resize(gray_, proc_, cv::Size(), scale, scale, cv::INTER_AREA);
@@ -1218,20 +1281,7 @@ private:
     for (const Group &g : groups_) {
       const int n = g.n;
       uint8_t bits[18 * 18];
-      int sum = 0;
-      for (int r = 0; r < n; r++)
-        for (int c = 0; c < n; c++) {
-          const float px = float(c + 0.5) / float(n),
-                      py = float(r + 0.5) / float(n);
-          const double a = h[0] * px + h[1] * py + h[2];
-          const double b = h[3] * px + h[4] * py + h[5];
-          const double w = h[6] * px + h[7] * py + h[8];
-          const uint8_t v =
-              uchar(0.5 + subpixel_value(proc_, cv::Point2f(a / w, b / w)));
-          bits[r * n + c] = v;
-          sum += v;
-        }
-      const double mean = double(sum) / double(n * n);
+      const double mean = double(sample(h, n, bits)) / double(n * n);
       for (int i = 0; i < n * n; i++)
         bits[i] = bits[i] > mean ? 255 : 0;
       int nrot = 0;
@@ -1246,6 +1296,101 @@ private:
       std::copy(mc, mc + 4, cand.c);
     }
     return nout;
+  }
+
+  // Samples the centres of an n x n cell grid through homography h (unit
+  // square -> image) into v; returns the sum.
+  int sample(const double *h, int n, uint8_t *v) const {
+    int sum = 0;
+    for (int r = 0; r < n; r++)
+      for (int c = 0; c < n; c++) {
+        const float px = float(c + 0.5) / float(n),
+                    py = float(r + 0.5) / float(n);
+        const double a = h[0] * px + h[1] * py + h[2];
+        const double b = h[3] * px + h[4] * py + h[5];
+        const double w = h[6] * px + h[7] * py + h[8];
+        const uint8_t x =
+            uchar(0.5 + subpixel_value(proc_, cv::Point2f(a / w, b / w)));
+        v[r * n + c] = x;
+        sum += x;
+      }
+    return sum;
+  }
+
+  // diagnose(): fills border/bit errors and contrast of quad q for the grid
+  // size of its decoded code, or (pick) for the closest grid size and code,
+  // also setting q.c (clockwise, image coordinates), cells and nearest_id.
+  void examine(const std::vector<cv::Point> &quad, QuadInfo &q,
+               bool pick) const {
+    cv::Point2f mc[4];
+    for (int j = 0; j < 4; j++)
+      mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
+    const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
+    const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
+    if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
+      std::swap(mc[1], mc[3]);
+    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
+    const double *h = Hm.ptr<double>(0);
+    int best = INT_MAX;
+    for (const Group &g : groups_) {
+      if (!pick && g.n != q.cells)
+        continue;
+      const int n = g.n, sz = n - 2;
+      uint8_t raw[18 * 18], bits[18 * 18];
+      const double mean = double(sample(h, n, raw)) / double(n * n);
+      double hi = 0, lo = 0;
+      int nhi = 0;
+      for (int i = 0; i < n * n; i++) {
+        bits[i] = raw[i] > mean ? 255 : 0;
+        if (bits[i]) {
+          hi += raw[i];
+          nhi++;
+        } else
+          lo += raw[i];
+      }
+      int border = 0;
+      for (int r = 0; r < n; r++)
+        for (int c = 0; c < n; c++)
+          if ((r == 0 || c == 0 || r == n - 1 || c == n - 1) && bits[r * n + c])
+            border++;
+      uint8_t inner[256], tmp[256];
+      for (int r = 0; r < sz; r++)
+        for (int c = 0; c < sz; c++)
+          inner[r * sz + c] = bits[(r + 1) * n + c + 1];
+      int wrong = INT_MAX, id = -1;
+      for (int rot = 0; rot < 4; rot++) {
+        for (const Code &code : g.codes) {
+          if (!pick && code.id != q.nearest_id)
+            continue;
+          int e = 0;
+          for (int i = 0; i < sz * sz; i++)
+            e += code.mask[i] && inner[i] != code.bits[i];
+          if (e < wrong) {
+            wrong = e;
+            id = code.id;
+          }
+        }
+        for (int i = 0; i < sz; i++)
+          for (int j = 0; j < sz; j++)
+            tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
+        std::memcpy(inner, tmp, (size_t)sz * sz);
+      }
+      if (border + wrong >= best)
+        continue;
+      best = border + wrong;
+      q.cells = n;
+      q.border_errors = border;
+      q.bit_errors = wrong;
+      q.nearest_id = id;
+      q.contrast =
+          nhi > 0 && nhi < n * n ? float(hi / nhi - lo / (n * n - nhi)) : 0.f;
+    }
+    if (pick) {
+      const float inv_scale = 1.f / scale_;
+      for (int k = 0; k < 4; k++)
+        q.c[k] = mc[k] * inv_scale;
+    }
   }
 
   // FractalMarkerDetector::getMarkerId on an n x n 0/255 grid.
@@ -1619,6 +1764,7 @@ private:
   };
 
   bool multiple_ = false;
+  float scale_ = 1.f;
   nanofractal::FractalMarkerSet set_;
   std::vector<Group> groups_;
   AdaptiveThreshold thresh_;

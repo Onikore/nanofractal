@@ -149,6 +149,52 @@ struct FractalDetectorImpl {
                           d.multiple_instances());
   }
 
+  // detect + why every convex quad was kept or dropped (debug aid):
+  // (ids, corners, multiple, n_contours, n_not_quad, quad_corners (K,4,2),
+  //  cells, reason, border_errors, bit_errors, nearest_id, contrast (K,)).
+  nb::tuple diagnose(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
+                     int rh = -1) {
+    cv::Mat im = as_image(arr);
+    bool has_roi = (rw > 0 && rh > 0);
+    cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
+    std::vector<Detection> markers;
+    std::vector<FastFractalDetector::QuadInfo> quads;
+    int n_contours = 0, n_not_quad = 0;
+    FastFractalDetector &d = detector(0);
+    {
+      nb::gil_scoped_release rel;
+      d.detect(work, markers);
+      d.diagnose(quads, n_contours, n_not_quad);
+    }
+    const float ox = has_roi ? (float)rx : 0.f, oy = has_roi ? (float)ry : 0.f;
+    std::vector<int32_t> ids;
+    std::vector<float> corners;
+    fill(markers, ids, corners, ox, oy);
+    size_t n = ids.size(), K = quads.size();
+    std::vector<float> qc(K * 8), contrast(K);
+    std::vector<int32_t> cells(K), reason(K), border(K), bits(K), nearest(K);
+    for (size_t i = 0; i < K; i++) {
+      const auto &q = quads[i];
+      for (int c = 0; c < 4; c++) {
+        qc[i * 8 + c * 2 + 0] = q.c[c].x + ox;
+        qc[i * 8 + c * 2 + 1] = q.c[c].y + oy;
+      }
+      cells[i] = q.cells;
+      reason[i] = q.reason;
+      border[i] = q.border_errors;
+      bits[i] = q.bit_errors;
+      nearest[i] = q.nearest_id;
+      contrast[i] = q.contrast;
+    }
+    return nb::make_tuple(
+        ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
+        d.multiple_instances(), n_contours, n_not_quad,
+        corners_to_numpy(std::move(qc), K), ids_to_numpy(std::move(cells)),
+        ids_to_numpy(std::move(reason)), ids_to_numpy(std::move(border)),
+        ids_to_numpy(std::move(bits)), ids_to_numpy(std::move(nearest)),
+        make_owned<float>(std::move(contrast), {K}));
+  }
+
   // detect + all visible (inner) corner correspondences for occlusion-robust
   // pose: returns (ids, corners, points_2d (M,2), points_3d (M,3)).
   nb::tuple detect_full(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
@@ -532,6 +578,9 @@ NB_MODULE(_nanofractal, m) {
            nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
            nb::arg("rh") = -1)
       .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"),
+           nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
+           nb::arg("rh") = -1)
+      .def("diagnose", &FractalDetectorImpl::diagnose, nb::arg("image"),
            nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
            nb::arg("rh") = -1)
       .def("detect_batch", &FractalDetectorImpl::detect_batch,

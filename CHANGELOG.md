@@ -8,6 +8,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `FractalDetector.diagnose(image, roi=None)`: the detection plus every
+  candidate quad with the reason it was kept or dropped (`"accepted"`,
+  `"duplicate"`, `"border"`, `"bits"`), its closest code, the number of wrong
+  border cells and bits, and the cell contrast — to tell a reading failure
+  (one bit off) from a missing contour (R16). Same detection as `detect`.
 - Wheels for macOS (arm64 and x86_64, macOS 11+) and for CPython 3.14 (R1,
   R11a). The bundled OpenCV uses the pthreads backend on macOS as on Linux
   (its default there, Grand Central Dispatch, ignores `set_num_threads`).
