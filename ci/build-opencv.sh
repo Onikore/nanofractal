@@ -71,6 +71,10 @@ if [ "$(uname -s)" = "Darwin" ]; then
   EXTRA="-DWITH_OPENCL=OFF -DWITH_LAPACK=OFF -DWITH_PTHREADS_PF=ON"
   perl -pi -e 's/if\(APPLE AND NOT HAVE_TBB\)/if(FALSE) # nanofractal: no GCD/' "opencv-${OPENCV_VERSION}/cmake/OpenCVFindFrameworks.cmake"
   grep -q "nanofractal: no GCD" "opencv-${OPENCV_VERSION}/cmake/OpenCVFindFrameworks.cmake"
+  # parallel.cpp also defines HAVE_GCD itself on __APPLE__, ahead of pthreads
+  perl -0pi -e 's/#ifdef __APPLE__\n(\s*)#define HAVE_GCD/#if 0 \/\/ nanofractal: no GCD\n$1#define HAVE_GCD/' \
+    "opencv-${OPENCV_VERSION}/modules/core/src/parallel.cpp"
+  grep -q "nanofractal: no GCD" "opencv-${OPENCV_VERSION}/modules/core/src/parallel.cpp"
 fi
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 
