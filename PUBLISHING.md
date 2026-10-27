@@ -2,9 +2,11 @@
 
 Releases are automated by GitHub Actions (`.github/workflows/release.yml`):
 pushing a version tag builds the wheels — Linux x86_64 / aarch64 (manylinux,
-static minimal OpenCV from `ci/build-opencv.sh`) and Windows AMD64 (prebuilt
-OpenCV 4.10, bundled with `delvewheel`) — plus an sdist, runs the test-suite
-against every wheel, and uploads them to PyPI.
+native runners) and macOS arm64 / x86_64 (static minimal OpenCV from
+`ci/build-opencv.sh`), Windows AMD64 (prebuilt OpenCV 4.10, bundled with
+`delvewheel`), CPython 3.9–3.14 — plus an sdist, runs the test-suite against
+every wheel, and uploads them to PyPI. `gh workflow run release.yml --ref
+<branch>` builds and tests everything without publishing.
 
 ## Authentication: trusted publishing (OIDC)
 

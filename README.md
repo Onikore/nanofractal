@@ -75,8 +75,9 @@ Levers:
 pip install nanofractal
 ```
 
-Wheels are available for Linux x86_64/aarch64 and Windows AMD64 (x86_64 wheels
-require AVX2, i.e. Haswell 2013 or newer). They bundle a minimal OpenCV, so no
+Wheels are available for Linux x86_64/aarch64, macOS arm64/x86_64 (macOS 11+)
+and Windows AMD64, CPython 3.9–3.14 (x86_64 wheels require AVX2, i.e. Haswell
+2013 or newer). They bundle a minimal OpenCV, so no
 system OpenCV is required at runtime.
 
 ### Build from source

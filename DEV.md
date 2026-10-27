@@ -13,7 +13,9 @@ NF_MARCH=x86-64-v3 python -m pip install -e ".[test]"   # AVX2, like the x86_64 
 ```
 
 `CMAKE_PREFIX_PATH` selects a non-system OpenCV (e.g. a static build from
-`ci/build-opencv.sh`, which is what the Linux wheels use).
+`ci/build-opencv.sh`, which is what the Linux and macOS wheels use;
+`OPENCV_VERSION=5.0.0 OPENCV_CACHE_DIR=<dir> bash ci/build-opencv.sh` builds
+the OpenCV 5 used by the `test-opencv5` CI job).
 
 ## Tests
 

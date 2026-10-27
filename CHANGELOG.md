@@ -8,6 +8,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Wheels for macOS (arm64 and x86_64, macOS 11+) and for CPython 3.14 (R1,
+  R11a).
 - `DetectionResult.multiple_instances`: `True` when one marker level is seen
   in two separate places (two copies of the marker in view); detection still
   returns the largest copy of each level (R8a).
@@ -20,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `tvec`, `reproj_err`, `method` (`"inner"` / `"corners"`), `n_points`,
   `n_inliers` and `reproj_err_rel` (error / side of the largest detected
   level in px) (R2, R14).
+
+### Tooling / CI
+- aarch64 wheels build on GitHub's native arm64 runner instead of QEMU and run
+  the full test-suite for every Python version.
+- New CI job: static OpenCV 5.0 build with the AVX2 code paths (R11a).
 
 ### Documentation
 - Threads under load: next to capture/encoding fewer `detect()` threads can

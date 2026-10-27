@@ -26,8 +26,8 @@ frame and 4 ms per 4K frame** on a 6-core desktop CPU.
 pip install nanofractal
 ```
 
-Wheels for Linux x86_64 / aarch64 and Windows x64 (Python 3.9–3.13) bundle
-OpenCV; nothing else is required. x86_64 wheels need an AVX2 CPU (2013+).
+Wheels for Linux x86_64 / aarch64, macOS arm64 / x86_64 (11+) and Windows x64
+(Python 3.9–3.14) bundle OpenCV; nothing else is required. x86_64 wheels need an AVX2 CPU (2013+).
 
 ## Sixty seconds
 

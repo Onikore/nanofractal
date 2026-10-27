@@ -1,6 +1,7 @@
 name: release
 
-# Build portable manylinux wheels + sdist and publish to PyPI on a version tag.
+# Build portable wheels (manylinux x86_64/aarch64, macOS arm64/x86_64, Windows
+# AMD64) + sdist and publish to PyPI on a version tag.
 # Push a tag like v0.1.0 to trigger a release:
 #   git tag v0.1.0 && git push origin v0.1.0
 on:
@@ -10,20 +11,18 @@ on:
 
 jobs:
   wheels:
-    name: wheels ${{ matrix.arch }}
-    runs-on: ubuntu-latest
+    name: wheels linux ${{ matrix.arch }}
+    # aarch64 builds natively on GitHub's arm64 runner (no QEMU), so its wheels
+    # run the full test-suite like x86_64.
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - { arch: x86_64, qemu: false }
-          - { arch: aarch64, qemu: true }
+          - { arch: x86_64, os: ubuntu-latest }
+          - { arch: aarch64, os: ubuntu-24.04-arm }
     steps:
       - uses: actions/checkout@v4
-      - if: ${{ matrix.qemu }}
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: arm64
       - name: Cache static OpenCV
         uses: actions/cache@v4
         with:
@@ -36,6 +35,33 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: cibw-wheels-${{ matrix.arch }}
+          path: wheelhouse/*.whl
+
+  wheels_macos:
+    name: wheels macos ${{ matrix.arch }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: arm64, os: macos-14 }
+          - { arch: x86_64, os: macos-15-intel }
+    env:
+      OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv-cache
+    steps:
+      - uses: actions/checkout@v4
+      - name: Cache static OpenCV
+        uses: actions/cache@v4
+        with:
+          path: .opencv-cache
+          key: opencv-macos-${{ matrix.arch }}-${{ hashFiles('ci/build-opencv.sh') }}
+      - name: Build wheels
+        run: pipx run cibuildwheel --output-dir wheelhouse
+        env:
+          CIBW_ARCHS: ${{ matrix.arch }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cibw-wheels-macos-${{ matrix.arch }}
           path: wheelhouse/*.whl
 
   wheels_windows:
@@ -69,7 +95,7 @@ jobs:
 
   publish:
     name: Publish to PyPI
-    needs: [wheels, wheels_windows, sdist]
+    needs: [wheels, wheels_macos, wheels_windows, sdist]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
     # OIDC Trusted Publishing — no stored PyPI token. REQUIRES a one-time PyPI

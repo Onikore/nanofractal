@@ -26,3 +26,31 @@ jobs:
         with:
           files: ./coverage.xml
           fail_ci_if_error: false
+
+  test-opencv5:
+    name: build & test (static OpenCV 5.0, AVX2)
+    runs-on: ubuntu-latest
+    env:
+      OPENCV_VERSION: "5.0.0"
+      OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Cache static OpenCV 5
+        uses: actions/cache@v4
+        with:
+          path: .opencv5
+          key: opencv5-${{ hashFiles('ci/build-opencv.sh') }}
+      - name: Build static OpenCV 5
+        run: bash ci/build-opencv.sh
+      - name: Build and install
+        run: pip install -e ".[test]"
+        env:
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/.opencv5
+          NF_MARCH: x86-64-v3
+      - name: Check the linked OpenCV
+        run: python -c "import nanofractal as nf; v = nf._opencv_version(); print(v); assert v.startswith('5.')"
+      - name: Run tests
+        run: python -m pytest tests -q --ignore tests/test_benchmarks.py
