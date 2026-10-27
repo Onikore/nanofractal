@@ -40,7 +40,9 @@ def _monte_carlo(det, ids, obj, rv, tv, n=150, sigma=0.5):
     est, covs, poses = [], [], []
     for _ in range(n):
         noisy = (proj + rng.normal(0, sigma, proj.shape)).astype(np.float32)
-        p = det.estimate_pose(nf.DetectionResult(ids=ids, corners=noisy.reshape(-1, 4, 2)), K, D, full=True)
+        p = det.estimate_pose(
+            nf.DetectionResult(ids=ids, corners=noisy.reshape(-1, 4, 2)), K, D, full=True
+        )
         est.append(np.r_[p.rvec, p.tvec])
         covs.append(p.cov)
         poses.append(p)
@@ -63,8 +65,9 @@ def test_covariance_matches_scatter():
 def test_four_corners_have_covariance():
     det = nf.FractalDetector(CONFIG, marker_size=0.2)
     ids, obj = _level_corners(det)
-    est, covs, _ = _monte_carlo(det, ids[:1], obj[:4], np.array([0.3, 0.2, 0.0]),
-                                np.array([0.0, 0.0, 0.8]), n=150)
+    est, covs, _ = _monte_carlo(
+        det, ids[:1], obj[:4], np.array([0.3, 0.2, 0.0]), np.array([0.0, 0.0, 0.8]), n=150
+    )
     ratio = np.sqrt(np.diag(np.cov(est.T)) / np.diag(covs.mean(0)))
     assert np.all((ratio > 0.7) & (ratio < 1.4)), ratio
 
@@ -73,13 +76,15 @@ def test_second_solution_flags_ambiguity():
     det = nf.FractalDetector(CONFIG, marker_size=0.2)
     ids, obj = _level_corners(det)
     # strongly tilted, all levels: the mirror solution is far worse
-    _, _, poses = _monte_carlo(det, ids, obj, np.array([0.6, -0.3, 0.1]),
-                               np.array([0.05, -0.02, 0.9]), n=5)
+    _, _, poses = _monte_carlo(
+        det, ids, obj, np.array([0.6, -0.3, 0.1]), np.array([0.05, -0.02, 0.9]), n=5
+    )
     for p in poses:
         assert p.rvec_alt is not None and p.reproj_err_alt > 5 * p.reproj_err
     # small, nearly frontal outer level far away: both solutions fit the noise
-    _, _, poses = _monte_carlo(det, ids[:1], obj[:4], np.array([0.05, 0.02, 0.0]),
-                               np.array([0.0, 0.0, 6.0]), n=20)
+    _, _, poses = _monte_carlo(
+        det, ids[:1], obj[:4], np.array([0.05, 0.02, 0.0]), np.array([0.0, 0.0, 6.0]), n=20
+    )
     ratios = [p.reproj_err_alt / p.reproj_err for p in poses if p.rvec_alt is not None]
     assert len(ratios) >= 15 and np.median(ratios) < 2.0
     # the alternative is a genuinely different rotation

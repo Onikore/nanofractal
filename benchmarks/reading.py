@@ -1,7 +1,7 @@
 """benchmarks/reading.py — far markers, shadow edges and marker-like negatives.
 
-Synthetic frames for the bit reader (ROADMAP R16): a FRACTAL_4L_6 marker at a
-few pixels per cell, a marker under a hard shadow, and frames full of
+Synthetic frames for the bit reader (ROADMAP R16, R9): a FRACTAL_4L_6 marker
+at a few pixels per cell, under a hard shadow, partly occluded, and frames full of
 marker-like objects (random codes with a black border, markers of other
 configurations) that must not be detected. Deterministic (fixed seeds).
 
@@ -34,7 +34,7 @@ def _marker(size: int = 1200) -> np.ndarray:
     return m
 
 
-def render(rng, side, shadow=None, tilt=0.15):
+def render(rng, side, shadow=None, tilt=0.15, occlude=0.0):
     """Marker with a `side` px black square, random pose, on clutter."""
     img = _background(W, H, rng)
     mm = _marker()
@@ -54,6 +54,11 @@ def render(rng, side, shadow=None, tilt=0.15):
     sub = sub.reshape(y1 - y0, SS, x1 - x0, SS).mean((1, 3))
     cov = cov.reshape(y1 - y0, SS, x1 - x0, SS).mean((1, 3))
     img[y0:y1, x0:x1] = img[y0:y1, x0:x1] * (1 - cov) + sub
+    if occlude > 0:  # a dark or bright disc over `occlude` of the marker area
+        rad = side * np.sqrt(occlude / np.pi)
+        oc = c + rng.uniform(-0.5, 0.5, 2) * side
+        yy, xx = np.mgrid[0:H, 0:W]
+        img[(xx - oc[0]) ** 2 + (yy - oc[1]) ** 2 < rad * rad] = rng.choice([20.0, 235.0])
     if shadow is not None:  # half-plane through the marker, soft 2 px edge
         b = rng.uniform(0, 2 * np.pi)
         off = rng.uniform(-0.25, 0.25) * side
@@ -110,6 +115,16 @@ def main() -> None:
         frames = [render(rng, 10 * CELLS, shadow=dark) for _ in range(args.frames)]
         out[f"shadow_{dark}"] = np.mean([0 in det.detect(f).ids.tolist() for f in frames])
         print(f"  shadow x{dark}       {out[f'shadow_{dark}']:6.0%}")
+    for frac in [0.1, 0.25, 0.4]:
+        rng = np.random.default_rng(int(frac * 100) + 1)
+        frames = [render(rng, 10 * CELLS, occlude=frac) for _ in range(args.frames)]
+        found = [det.detect(f).ids.tolist() for f in frames]
+        out[f"occlusion_{frac}_outer"] = np.mean([0 in ids for ids in found])
+        out[f"occlusion_{frac}_any"] = np.mean([len(ids) > 0 for ids in found])
+        print(
+            f"  occluded {frac:.0%}        {out[f'occlusion_{frac}_outer']:6.0%}"
+            f"   (any level: {out[f'occlusion_{frac}_any']:.0%})"
+        )
     rng = np.random.default_rng(7)
     neg = [negative(rng) for _ in range(args.negatives)]
     t0 = time.perf_counter()

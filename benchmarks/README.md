@@ -62,8 +62,9 @@ python benchmarks/robustness.py --real-dir benchmarks/real_images
 
 The bit reader under its hardest synthetic cases (`FRACTAL_4L_6`,
 1280×720 frames on clutter, blur 0.6, noise 3, random pose): share of frames
-where the external level is found at 2.2–4.4 px per cell and under a hard
-shadow edge (×0.6, ×0.45, ×0.3), plus how many of 300 frames full of
+where the external level is found at 2.2–4.4 px per cell, under a hard
+shadow edge (×0.6, ×0.45, ×0.3) and with 10–40 % of the marker covered by a
+disc (also: any level found), plus how many of 300 frames full of
 marker-like objects (random codes with a black border, markers of other
 configurations) produce any detection — that must stay 0.
 
