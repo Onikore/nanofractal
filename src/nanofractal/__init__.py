@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import NamedTuple
 
 import numpy as np
@@ -187,6 +187,9 @@ class DetectionResult:
     # True when one marker level was seen in two separate places (two copies
     # of the marker in view); only the largest copy of each level is returned.
     multiple_instances: bool = False
+    # Levels found but dropped because their position does not fit the other
+    # levels of the marker (a false candidate with a valid id elsewhere).
+    inconsistent_ids: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
 
     def __len__(self) -> int:
         return int(self.ids.shape[0])
@@ -215,7 +218,7 @@ class QuadInfo(NamedTuple):
     """One convex quad seen by ``FractalDetector.diagnose``."""
 
     corners: np.ndarray  # float32 (4, 2), image px, before sub-pixel refinement
-    reason: str  # "accepted", "duplicate", "border" or "bits"
+    reason: str  # "accepted", "duplicate", "border", "bits" or "inconsistent"
     cells: int  # grid size (border included) of the closest code
     nearest_id: int  # id of the closest code
     border_errors: int  # border cells read as white (must all be black)
@@ -242,7 +245,7 @@ class Diagnosis:
         )
 
 
-_REASONS = ("accepted", "duplicate", "border", "bits")
+_REASONS = ("accepted", "duplicate", "border", "bits", "inconsistent")
 
 
 _FRACTAL_CONFIGS = {"FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"}
@@ -280,15 +283,17 @@ class FractalDetector:
         if roi is not None:
             rx, ry, rw, rh = _validate_roi(roi, image)
             if with_inner_points:
-                ids, corners, p2d, p3d, multi = self._d.detect_full(image, rx, ry, rw, rh)
-                return DetectionResult(ids, corners, p2d, p3d, multi)
-            ids, corners, multi = self._d.detect(image, rx, ry, rw, rh)
+                ids, corners, p2d, p3d, multi, drop = self._d.detect_full(image, rx, ry, rw, rh)
+                return DetectionResult(ids, corners, p2d, p3d, multi, drop)
+            ids, corners, multi, drop = self._d.detect(image, rx, ry, rw, rh)
         else:
             if with_inner_points:
-                ids, corners, p2d, p3d, multi = self._d.detect_full(image)
-                return DetectionResult(ids, corners, p2d, p3d, multi)
-            ids, corners, multi = self._d.detect(image)
-        return DetectionResult(ids=ids, corners=corners, multiple_instances=multi)
+                ids, corners, p2d, p3d, multi, drop = self._d.detect_full(image)
+                return DetectionResult(ids, corners, p2d, p3d, multi, drop)
+            ids, corners, multi, drop = self._d.detect(image)
+        return DetectionResult(
+            ids=ids, corners=corners, multiple_instances=multi, inconsistent_ids=drop
+        )
 
     def diagnose(
         self,
@@ -301,7 +306,8 @@ class FractalDetector:
         convex quad is listed with its reason (``"accepted"``,
         ``"duplicate"`` -- a smaller copy of a level already found,
         ``"border"`` -- the black frame did not read black, ``"bits"`` -- the
-        frame is fine but no code matched), the grid size and code it came
+        frame is fine but no code matched, ``"inconsistent"`` -- decoded but
+        not where the other levels put it), the grid size and code it came
         closest to, how many cells were wrong and the cell contrast. A quad
         one or two bits away from a real id is a reading problem (blur,
         shadow, too few pixels per cell); many wrong bits mean it is not the
@@ -314,7 +320,7 @@ class FractalDetector:
             out = self._d.diagnose(image, rx, ry, rw, rh)
         else:
             out = self._d.diagnose(image)
-        ids, corners, multi, n_cont, n_nq, qc, cells, reason, border, bits, near, con = out
+        ids, corners, multi, drop, n_cont, n_nq, qc, cells, reason, border, bits, near, con = out
         quads = [
             QuadInfo(
                 qc[i],
@@ -328,7 +334,9 @@ class FractalDetector:
             for i in range(len(reason))
         ]
         return Diagnosis(
-            DetectionResult(ids=ids, corners=corners, multiple_instances=multi),
+            DetectionResult(
+                ids=ids, corners=corners, multiple_instances=multi, inconsistent_ids=drop
+            ),
             int(n_cont),
             int(n_nq),
             quads,
@@ -350,7 +358,10 @@ class FractalDetector:
             results = self._d.detect_batch(imgs, int(num_threads), rx, ry, rw, rh)
         else:
             results = self._d.detect_batch(imgs, int(num_threads))
-        return [DetectionResult(ids=i, corners=c, multiple_instances=m) for i, c, m in results]
+        return [
+            DetectionResult(ids=i, corners=c, multiple_instances=m, inconsistent_ids=d)
+            for i, c, m, d in results
+        ]
 
     def estimate_pose(
         self,

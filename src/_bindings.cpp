@@ -76,11 +76,17 @@ static void fill(const std::vector<Detection> &markers,
   }
 }
 
+static nb::object dropped_ids(const FastFractalDetector &d) {
+  std::vector<int32_t> v(d.inconsistent_ids().begin(),
+                         d.inconsistent_ids().end());
+  return nb::cast(ids_to_numpy(std::move(v)));
+}
+
 static nb::tuple full_result(std::vector<int32_t> &&ids,
                              std::vector<float> &&corners,
                              const std::vector<cv::Point2f> &p2d,
                              const std::vector<cv::Point3f> &p3d, float ox,
-                             float oy, bool multiple) {
+                             float oy, bool multiple, nb::object dropped) {
   size_t n = ids.size();
   size_t m2 = p2d.size();
   std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
@@ -94,7 +100,7 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
   return nb::make_tuple(
       ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
       make_owned<float>(std::move(pts2), {m2, (size_t)2}),
-      make_owned<float>(std::move(pts3), {m2, (size_t)3}), multiple);
+      make_owned<float>(std::move(pts3), {m2, (size_t)3}), multiple, dropped);
 }
 
 struct FractalDetectorImpl {
@@ -146,7 +152,7 @@ struct FractalDetectorImpl {
     size_t n = ids.size();
     return nb::make_tuple(ids_to_numpy(std::move(ids)),
                           corners_to_numpy(std::move(corners), n),
-                          d.multiple_instances());
+                          d.multiple_instances(), dropped_ids(d));
   }
 
   // detect + why every convex quad was kept or dropped (debug aid):
@@ -188,7 +194,7 @@ struct FractalDetectorImpl {
     }
     return nb::make_tuple(
         ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
-        d.multiple_instances(), n_contours, n_not_quad,
+        d.multiple_instances(), dropped_ids(d), n_contours, n_not_quad,
         corners_to_numpy(std::move(qc), K), ids_to_numpy(std::move(cells)),
         ids_to_numpy(std::move(reason)), ids_to_numpy(std::move(border)),
         ids_to_numpy(std::move(bits)), ids_to_numpy(std::move(nearest)),
@@ -215,7 +221,7 @@ struct FractalDetectorImpl {
     std::vector<float> corners;
     fill(markers, ids, corners, ox, oy);
     return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy,
-                       d.multiple_instances());
+                       d.multiple_instances(), dropped_ids(d));
   }
 
   // Parallel batch detection. The detector is not thread-safe, so each worker
@@ -247,6 +253,7 @@ struct FractalDetectorImpl {
     std::vector<std::vector<int32_t>> all_ids(N);
     std::vector<std::vector<float>> all_corners(N);
     std::vector<char> all_multiple(N, 0);
+    std::vector<std::vector<int32_t>> all_dropped(N);
     if (N > 0) {
       nb::gil_scoped_release rel;
       std::atomic<size_t> next{0};
@@ -257,6 +264,8 @@ struct FractalDetectorImpl {
           pool[t]->detect(mats[i], markers);
           fill(markers, all_ids[i], all_corners[i], ox_, oy_);
           all_multiple[i] = pool[t]->multiple_instances();
+          all_dropped[i].assign(pool[t]->inconsistent_ids().begin(),
+                                pool[t]->inconsistent_ids().end());
         }
       };
       std::vector<std::thread> ths;
@@ -269,10 +278,10 @@ struct FractalDetectorImpl {
     out.reserve(N);
     for (size_t i = 0; i < N; i++) {
       size_t n = all_ids[i].size();
-      out.push_back(
-          nb::make_tuple(ids_to_numpy(std::move(all_ids[i])),
-                         corners_to_numpy(std::move(all_corners[i]), n),
-                         (bool)all_multiple[i]));
+      out.push_back(nb::make_tuple(
+          ids_to_numpy(std::move(all_ids[i])),
+          corners_to_numpy(std::move(all_corners[i]), n), (bool)all_multiple[i],
+          ids_to_numpy(std::move(all_dropped[i]))));
     }
     return out;
   }
@@ -655,7 +664,7 @@ NB_MODULE(_nanofractal, m) {
         std::vector<float> corners;
         fill(det, ids, corners);
         return full_result(std::move(ids), std::move(corners), p2d, p3d, 0.f,
-                           0.f, false);
+                           0.f, false, nb::cast(ids_to_numpy({})));
       },
       nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
       nb::arg("image"), nb::arg("inner"));

@@ -69,6 +69,20 @@ print(det.detect(twice).multiple_instances, det.detect(page).multiple_instances)
 With `FractalTracker` or an ROI only the copies inside the searched region
 are seen.
 
+### Levels that do not fit
+
+All levels of one marker lie on one plane, so the corners of a larger level
+predict where each smaller level must be. A level found far from that place
+(a valid id decoded somewhere else: a second copy, a printout of one level, a
+false read) is dropped and its id listed in `res.inconsistent_ids`; the
+remaining levels agree with each other. The check only catches gross
+misplacement (more than half the level's side): lens distortion and perspective
+never trigger it.
+
+```python
+print(det.detect(page).inconsistent_ids)    # [] -- every level in its place
+```
+
 ## Regions of interest
 
 When you know where the marker can be, restrict the search. The ROI is a

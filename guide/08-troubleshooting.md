@@ -55,6 +55,7 @@ for q in d.quads:
 | `"duplicate"` | decoded, but a larger quad of the same level was kept (the same square traced twice, or a second copy of the marker) |
 | `"border"` | some cells of the black frame read white |
 | `"bits"` | the frame is black, but no code matches |
+| `"inconsistent"` | decoded, but not where the other levels put it (dropped, see `inconsistent_ids`) |
 
 A quad of the marker's size that misses its id by one to three bits
 (`bit_errors`) is a reading problem: too few pixels per cell, blur, or a

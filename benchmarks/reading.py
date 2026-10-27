@@ -115,8 +115,10 @@ def main() -> None:
     t0 = time.perf_counter()
     out["negative_frames_with_detection"] = sum(len(det.detect(f)) > 0 for f in neg)
     ms = (time.perf_counter() - t0) / len(neg) * 1e3
-    print(f"  negatives with a detection: {out['negative_frames_with_detection']}/{len(neg)}"
-          f"  ({ms:.2f} ms/frame)")
+    print(
+        f"  negatives with a detection: {out['negative_frames_with_detection']}/{len(neg)}"
+        f"  ({ms:.2f} ms/frame)"
+    )
     if args.json:
         with open(args.json, "w") as f:
             json.dump({k: float(v) for k, v in out.items()}, f, indent=1)

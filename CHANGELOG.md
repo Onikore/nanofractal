@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers), so `ids` and inner points can grow (R16).
 
 ### Added
+- Level consistency check: the homography of a larger level predicts the
+  corners of each smaller one; a level found elsewhere (more than half its
+  side away) is dropped and listed in `DetectionResult.inconsistent_ids`
+  (also in `detect_batch` and `diagnose`, reason `"inconsistent"`). No real
+  level dropped on 696 synthetic frames of all configurations, including
+  strong uncorrected lens distortion (R18).
 - `FractalDetector.diagnose(image, roi=None)`: the detection plus every
   candidate quad with the reason it was kept or dropped (`"accepted"`,
   `"duplicate"`, `"border"`, `"bits"`), its closest code, the number of wrong

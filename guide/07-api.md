@@ -57,6 +57,7 @@ FractalTracker(detector, margin=0.25, pad=16)
 | `points_2d` | float32 `(M, 2)` or `None` — inner+outer image points |
 | `points_3d` | float32 `(M, 3)` or `None` — matching marker points, z = 0 |
 | `multiple_instances` | `bool` — a level was seen in two separate places (two copies of the marker); only the largest of each level is returned |
+| `inconsistent_ids` | int32 `(K,)` — levels dropped because they are not where the other levels put them |
 
 `len(r)`, `bool(r)`, `for level_id, corners in r`, readable `repr`.
 
@@ -71,7 +72,7 @@ FractalTracker(detector, margin=0.25, pad=16)
 
 `QuadInfo(corners, reason, cells, nearest_id, border_errors, bit_errors,
 contrast)`: corners float32 `(4, 2)` before sub-pixel refinement; `reason`
-one of `"accepted"`, `"duplicate"`, `"border"`, `"bits"`; `cells` the grid
+one of `"accepted"`, `"duplicate"`, `"border"`, `"bits"`, `"inconsistent"`; `cells` the grid
 size (border included) and `nearest_id` the code it came closest to;
 `border_errors` frame cells read white; `bit_errors` inner bits that differ
 from `nearest_id`; `contrast` mean bright minus mean dark cell (grey levels).

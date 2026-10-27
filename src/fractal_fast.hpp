@@ -1049,8 +1049,12 @@ public:
   // (two copies of the marker); only the largest of each id is returned.
   bool multiple_instances() const { return multiple_; }
 
+  // Ids of levels the last detection dropped because their position does not
+  // agree with the other levels of the marker (see check_levels()).
+  const std::vector<int> &inconsistent_ids() const { return dropped_; }
+
   // Debug aid: why each quad of the last detection was kept or dropped.
-  enum Reason { kAccepted = 0, kDuplicate, kBorder, kBits };
+  enum Reason { kAccepted = 0, kDuplicate, kBorder, kBits, kInconsistent };
   struct QuadInfo {
     cv::Point2f c[4]; // image coordinates, unrefined
     int cells;        // grid size (with border) of the closest match
@@ -1084,18 +1088,24 @@ public:
       const int nd = decode(approx, dec.data());
       if (nd > 0) {
         bool kept = false;
+        int kept_id = -1;
         for (int d = 0; d < nd && !kept; d++) {
           cv::Point2f c[4];
           for (int k = 0; k < 4; k++)
             c[k] = scale_ < 1.f ? dec[d].c[k] * inv_scale : dec[d].c[k];
           for (const Candidate &m : cands_)
-            if (m.id == dec[d].id && std::equal(c, c + 4, m.c))
+            if (m.id == dec[d].id && std::equal(c, c + 4, m.c)) {
               kept = true;
+              kept_id = m.id;
+            }
         }
         const Candidate &d0 = dec[0];
         for (int k = 0; k < 4; k++)
           q.c[k] = d0.c[k] * inv_scale;
         q.reason = kept ? kAccepted : kDuplicate;
+        if (kept && std::find(dropped_.begin(), dropped_.end(), kept_id) !=
+                        dropped_.end())
+          q.reason = kInconsistent;
         q.nearest_id = d0.id;
         for (const Group &g : groups_)
           for (const Code &code : g.codes)
@@ -1280,6 +1290,73 @@ private:
       for (int c = 0; c < 4; c++)
         out[i].corners[c] = corners_[i * 4 + c];
     }
+    check_levels(out);
+  }
+
+  static int popcount16(uint16_t v) {
+    int n = 0;
+    for (; v; v &= uint16_t(v - 1))
+      n++;
+    return n;
+  }
+
+  // Levels of one marker lie on one plane: the homography of a larger level
+  // predicts the corners of a smaller one. Levels that do not agree with the
+  // level most others agree with (ties: the largest) are dropped. Real
+  // levels disagree by up to ~21 % of the smaller side under strong
+  // uncorrected lens distortion (k1 = -0.35) and ~12 % at a few px per cell,
+  // so the tolerance only catches a level found somewhere else.
+  static constexpr float kLevelTolPx = 2.f, kLevelTolRel = 0.5f;
+  void check_levels(std::vector<Detection> &out) {
+    dropped_.clear();
+    const int N = (int)out.size();
+    if (N < 2)
+      return;
+    float side[16];
+    for (int i = 0; i < N; i++) {
+      const cv::Point2f *c = out[i].corners;
+      side[i] = 0.25f * float(cv::norm(c[0] - c[1]) + cv::norm(c[1] - c[2]) +
+                              cv::norm(c[2] - c[3]) + cv::norm(c[3] - c[0]));
+    }
+    uint16_t agree[16] = {};
+    for (int a = 0; a < N; a++) {
+      cv::Point2f plane[4];
+      const auto &ka = set_.fractalMarkerCollection.at(out[a].id).keypts;
+      for (int c = 0; c < 4; c++)
+        plane[c] = ka[c].pt;
+      const cv::Mat Hm = cv::getPerspectiveTransform(plane, out[a].corners);
+      const double *h = Hm.ptr<double>(0);
+      for (int b = 0; b < N; b++) {
+        if (b == a || side[b] > side[a] || (side[b] == side[a] && b < a))
+          continue; // predict the smaller level from the larger one
+        const auto &kb = set_.fractalMarkerCollection.at(out[b].id).keypts;
+        float err = 0.f;
+        for (int c = 0; c < 4; c++) {
+          const double x = kb[c].pt.x, y = kb[c].pt.y;
+          const double w = h[6] * x + h[7] * y + h[8];
+          const cv::Point2f p(float((h[0] * x + h[1] * y + h[2]) / w),
+                              float((h[3] * x + h[4] * y + h[5]) / w));
+          err = std::max(err, float(cv::norm(p - out[b].corners[c])));
+        }
+        if (err <= kLevelTolPx + kLevelTolRel * side[b]) {
+          agree[a] |= uint16_t(1u << b);
+          agree[b] |= uint16_t(1u << a);
+        }
+      }
+    }
+    int anchor = 0;
+    for (int i = 1; i < N; i++) {
+      const int da = popcount16(agree[anchor]), di = popcount16(agree[i]);
+      if (di > da || (di == da && side[i] > side[anchor]))
+        anchor = i;
+    }
+    int w = 0;
+    for (int i = 0; i < N; i++)
+      if (i == anchor || (agree[anchor] >> i & 1))
+        out[w++] = out[i];
+      else
+        dropped_.push_back(out[i].id);
+    out.resize(w);
   }
 
   // Sample every bit-grid size through the candidate's homography and match it
@@ -1916,6 +1993,7 @@ private:
 
   bool multiple_ = false;
   float scale_ = 1.f;
+  std::vector<int> dropped_; // levels removed by check_levels()
   nanofractal::FractalMarkerSet set_;
   std::vector<Group> groups_;
   AdaptiveThreshold thresh_;
