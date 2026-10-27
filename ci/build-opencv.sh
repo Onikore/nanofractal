@@ -37,10 +37,10 @@ case "$OPENCV_VERSION" in
   5.0.0) sha="b0528f5a1d379d59d4701cb28c36e22214cc51cf64594e5b56f2d3e6c0233095" ;;
   *) echo "no pinned SHA-256 for OpenCV $OPENCV_VERSION" >&2; exit 1 ;;
 esac
-if command -v sha256sum >/dev/null; then
+if [ "$(uname -s)" = "Darwin" ]; then # macOS 15 ships a BSD sha256sum
+  echo "${sha}  opencv.tar.gz" | shasum -a 256 --check
+else
   echo "${sha}  opencv.tar.gz" | sha256sum --check --strict
-else # macOS
-  echo "${sha}  opencv.tar.gz" | shasum -a 256 --check --strict
 fi
 tar xzf opencv.tar.gz
 
@@ -62,10 +62,15 @@ case "$OPENCV_VERSION" in
 esac
 
 # macOS: keep the static libs free of framework dependencies (OpenCL,
-# Accelerate LAPACK) that nanofractal never uses.
+# Accelerate LAPACK) that nanofractal never uses, and use the pthreads
+# parallel backend like Linux: OpenCV picks Grand Central Dispatch on Apple
+# unconditionally, and GCD ignores setNumThreads() (set_num_threads(2) would
+# still use every core, get_num_threads() always reports the core count).
 EXTRA=""
 if [ "$(uname -s)" = "Darwin" ]; then
-  EXTRA="-DWITH_OPENCL=OFF -DWITH_LAPACK=OFF"
+  EXTRA="-DWITH_OPENCL=OFF -DWITH_LAPACK=OFF -DWITH_PTHREADS_PF=ON"
+  perl -pi -e 's/if\(APPLE AND NOT HAVE_TBB\)/if(FALSE) # nanofractal: no GCD/' "opencv-${OPENCV_VERSION}/cmake/OpenCVFindFrameworks.cmake"
+  grep -q "nanofractal: no GCD" "opencv-${OPENCV_VERSION}/cmake/OpenCVFindFrameworks.cmake"
 fi
 NPROC="$(nproc 2>/dev/null || sysctl -n hw.ncpu)"
 
