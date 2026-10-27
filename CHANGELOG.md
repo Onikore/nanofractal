@@ -5,6 +5,17 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `guide/`: a user guide (markers and printing, detection, pose, video,
+  performance, tuning, API reference, troubleshooting) whose examples are run
+  by `tests/test_guide.py`.
+
+### Fixed
+- Bounded reads in the reference detector's `getSubpixelValue` (ASan).
+- `FractalTracker` typing (mypy / stubtest).
+
 ## [0.6.0] - 2026-10-27
 
 ### Removed (breaking)

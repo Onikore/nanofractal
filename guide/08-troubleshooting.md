@@ -1,0 +1,64 @@
+# 8. Troubleshooting
+
+## The marker is not detected
+
+Work through these in order:
+
+1. **Right configuration?** A `FRACTAL_4L_6` detector does not see a
+   `FRACTAL_5L_6` print.
+2. **Big enough?** The external marker needs ~50 px of side in the image
+   (after `detection_scale`). Move closer, raise the resolution or remove
+   `detection_scale`.
+3. **Quiet zone.** The black border must be surrounded by white (≥ 1 cell).
+   A marker printed edge-to-edge on a dark table, or touching the image
+   border, is not found.
+4. **Mirrored image?** A mirrored marker reads as a different code; some
+   front cameras and screen grabs mirror the image — flip it back.
+5. **Contrast.** Glare, very dim light or grey print: try `adaptive_c = 4`.
+6. **Distortion.** Wide-angle lenses bend the edges; detect on the raw frame
+   and try `approx_poly_rate = 0.07` (or undistort first).
+7. **Blur.** Motion blur breaks the cell pattern; shorten the exposure.
+
+Look at what the detector sees with the drawing helper:
+
+```python
+import numpy as np
+import nanofractal as nf
+
+det = nf.FractalDetector("FRACTAL_5L_6")
+frame = np.full((600, 600), 255, np.uint8)
+frame[100:500, 100:500] = nf.generate_fractal("FRACTAL_5L_6", 400)
+res = det.detect(frame)
+overlay = det.draw(frame, res, inplace=False)
+print(res, overlay.shape)       # save `overlay` and inspect it
+```
+
+## The pose jumps or is wrong
+
+- Check `reproj_err`: above ~2 px the correspondences or the intrinsics are
+  off. Gate on it.
+- Use `with_inner_points=True` — four corners of a small marker leave the
+  rotation poorly constrained (the classic planar flip ambiguity).
+- Make sure `marker_size` is the printed **black square** side, in the unit
+  you expect the translation in.
+- Wrong or missing distortion coefficients bend everything near the image
+  edges; calibrate.
+- Smooth with `PoseSmoother` and reset it when the marker is lost.
+
+## Errors
+
+| error | cause |
+|---|---|
+| `TypeError` in `detect` | not `uint8`, or not C-contiguous → `np.ascontiguousarray(img, dtype=np.uint8)` |
+| `ValueError: ... shape` | 4-channel (BGRA) or 1-D input → convert to gray or BGR |
+| `ValueError: invalid config` | typo in the configuration name |
+| `ValueError: adaptive_block_size ...` (or another field) | parameter out of range, see [Tuning](06-tuning.md) |
+| `ValueError: roi ...` | ROI outside the image or empty |
+| `ValueError` in `estimate_pose` | `camera_matrix` not 3×3, unsupported number of distortion coefficients, NaN/inf values, or `fisheye=True` without exactly 4 coefficients |
+
+## Performance is lower than expected
+
+- Call `nf.get_num_threads()`: something may have set it to 1.
+- Several streams at once? See [Video](04-video.md#several-cameras-or-streams).
+- Running `python -m nanofractal.bench` shows what your machine does on the
+  reference scenes; compare with [Performance](05-performance.md).

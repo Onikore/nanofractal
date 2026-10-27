@@ -13,6 +13,11 @@ correspondences for accurate pose.
 
 Since 0.6 the library is fractal-only (the ArUco detector was removed).
 
+**📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
+markers and printing, detection, pose, video, **how to use it most
+efficiently**, parameter tuning, API reference, troubleshooting. Every example
+in it is executed by the test-suite.
+
 ---
 
 ## Performance
@@ -55,8 +60,8 @@ Levers:
   downscaled frame (corners are still refined at full resolution); `0.5` is
   roughly 3–4× faster at 4K.
 - **`FractalTracker`** — for video: searches near the previous frame's
-  markers (whole frame when they are lost), with identical accuracy; ~2.2×
-  faster at 4K and 1.2–1.8× at 1080p on a moving-marker sequence.
+  markers (whole frame when they are lost), with identical accuracy; ~2×
+  faster at 4K and 1.4–1.8× at 1080p on a moving-marker sequence.
 - **`detect_batch`** — parallelises across frames for offline throughput.
 
 ---
