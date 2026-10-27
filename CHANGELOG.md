@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Far markers: a quad the reference bit reader rejects gets a second
+  reading — each cell sampled exactly at its centre (the reference sampler
+  is up to a pixel off, a whole cell at 2–4 px per cell), on corners refined
+  to sub-pixel when the first try fails. Synthetic far frames, outer level of
+  `FRACTAL_4L_6`: found at 2.6 px/cell 0 → 80 %, 3.0 px/cell 0 → 100 %,
+  3.5 px/cell 27 → 100 %; no detection on 300 frames of marker-like
+  negatives; speed unchanged. Levels the reference finds keep exactly their
+  corners; more inner levels are found (e.g. blur σ=2, 45–60° tilt, small
+  markers), so `ids` and inner points can grow (R16).
+
 ### Added
 - `FractalDetector.diagnose(image, roi=None)`: the detection plus every
   candidate quad with the reason it was kept or dropped (`"accepted"`,

@@ -53,7 +53,7 @@ mean "no scaling".
 factors use an exact area resize that costs a little more but is never slower
 than not scaling (before 0.6.2 they were).
 
-The price of scaling is range: a level must still be ~50 px wide *after*
+The price of scaling is range: a level must still be ~45 px wide *after*
 scaling, so the smallest inner levels (and markers far away) drop out first.
 Good fit: 4K cameras watching a marker that fills a decent part of the frame.
 

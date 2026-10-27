@@ -74,7 +74,9 @@ planar, which the pose assumes.
 
 A marker of side `L` metres at distance `Z` appears `f · L / Z` pixels wide,
 where `f` is the focal length in pixels (from calibration; roughly
-`width / (2·tan(HFOV/2))`). With the ~50 px detection limit:
+`width / (2·tan(HFOV/2))`). A level is read from about 3 px per cell; the
+external level has 13–15 cells per side (border included), so it needs
+~45 px (sharp, well-lit frames; blur and noise raise that):
 
 ```python
 import math
@@ -82,9 +84,9 @@ import math
 width_px, hfov_deg = 1920, 70.0
 f = width_px / (2 * math.tan(math.radians(hfov_deg) / 2))   # ~1371 px
 L = 0.20                                                    # marker side, m
-print("external level up to", round(f * L / 50, 1), "m")    # ~5.5 m
+print("external level up to", round(f * L / 45, 1), "m")    # ~6.1 m
 # the innermost FRACTAL_5L_6 level is L/39 wide: it needs the camera within
-print("innermost level from", round(f * (L / 39) / 50, 2), "m")
+print("innermost level from", round(f * (L / 39) / 45, 2), "m")
 ```
 
 Higher resolution scales the range linearly — and costs time; see

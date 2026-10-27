@@ -6,9 +6,9 @@ Work through these in order:
 
 1. **Right configuration?** A `FRACTAL_4L_6` detector does not see a
    `FRACTAL_5L_6` print.
-2. **Big enough?** The external marker needs ~50 px of side in the image
-   (after `detection_scale`). Move closer, raise the resolution or remove
-   `detection_scale`.
+2. **Big enough?** The external marker needs ~45 px of side in the image
+   (about 3 px per cell, after `detection_scale`). Move closer, raise the
+   resolution or remove `detection_scale`.
 3. **Quiet zone.** The black border must be surrounded by white (≥ 1 cell).
    A marker printed edge-to-edge on a dark table, or touching the image
    border, is not found.

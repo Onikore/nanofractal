@@ -1,9 +1,13 @@
 """The optimised detector must return exactly what the upstream reference
 detector (third_party/nanofractal.h, exposed as _reference_detect) returns.
 
-Outer-corner detection is bit-identical by design. The inner-point path
-differs on purpose in one respect (FAST runs only around the marker, see
-src/fractal_fast.hpp), so for it we only require the same detected markers.
+Outer-corner detection is bit-identical by design for every level the
+reference finds. Quads the reference reading rejects get a second reading
+(refined corners, exact cell sampling: R16), which may add levels the
+reference misses -- typically the innermost one at a few pixels per cell;
+those must lie inside the marker. The inner-point path differs on purpose in
+one respect (FAST runs only around the marker, see src/fractal_fast.hpp), so
+for it we only require the same detected markers.
 """
 
 import numpy as np
@@ -23,11 +27,23 @@ def _params(**kw):
     return p
 
 
+def _check_against_reference(got, ref_ids, ref_corners):
+    ids = got.ids.tolist()
+    assert set(ref_ids.tolist()) <= set(ids)
+    for i, mid in enumerate(ref_ids.tolist()):
+        np.testing.assert_array_equal(got.corners[ids.index(mid)], ref_corners[i])
+    if len(ids):
+        outer = got.corners[0]  # ids are sorted: the largest level found
+        lo, hi = outer.min(0), outer.max(0)
+        for mid, c in zip(ids, got.corners):
+            if mid not in ref_ids:  # added by the second reading
+                assert np.all(c >= lo) and np.all(c <= hi), (mid, c, outer)
+
+
 def _same(img, config, params):
     ref = _nf._reference_detect(config, -1.0, params, img, False)
     got = nf.FractalDetector(config, params=params).detect(img)
-    assert got.ids.tolist() == ref[0].tolist()
-    np.testing.assert_array_equal(got.corners, ref[1])
+    _check_against_reference(got, ref[0], ref[1])
     return got
 
 
@@ -81,8 +97,7 @@ def test_inner_points_same_markers():
     img = generate_scene(1280, 720, "perspective")
     ref = _nf._reference_detect("FRACTAL_5L_6", 1.0, _params(), img, True)
     got = nf.FractalDetector("FRACTAL_5L_6", marker_size=1.0).detect(img, with_inner_points=True)
-    assert got.ids.tolist() == ref[0].tolist()
-    np.testing.assert_array_equal(got.corners, ref[1])
+    _check_against_reference(got, ref[0], ref[1])
     assert got.points_2d.shape[0] > 0
 
 

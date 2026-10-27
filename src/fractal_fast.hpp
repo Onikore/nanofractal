@@ -1024,6 +1024,7 @@ public:
       }
       groups_.push_back(std::move(g));
     }
+    CV_Assert(groups_.size() <= 16); // decode()'s per-size flags
   }
 
   // Outer-corner detection. `out` is cleared and filled with one entry per
@@ -1119,9 +1120,17 @@ private:
     int n; // cells per side including the black border
     std::vector<Code> codes;
   };
+  // Second reading only for quads whose cells split into dark and bright
+  // classes at least this far apart (grey levels); corners are refined only
+  // when the exact reading also has at most n/4 border cells read white.
+  // Measured: same recall as without the gates on far markers, and no
+  // cornerSubPix call on the benchmark scenes.
+  static constexpr int kRereadContrast = 40;
+
   struct Candidate {
     int id;
     cv::Point2f c[4];
+    bool reread; // decoded only by the second reading
   };
 
   void to_gray(const cv::Mat &img) {
@@ -1208,16 +1217,27 @@ private:
       for (int j = 0; j < nslots_[i]; j++)
         cands_.push_back(slots_[(size_t)i * G + j]);
 
-    // duplicates: sort by id and, within an id, largest perimeter first
-    std::sort(cands_.begin(), cands_.end(),
-              [](const Candidate &a, const Candidate &b) {
-                if (a.id < b.id)
-                  return true;
-                else if (a.id == b.id)
-                  return perimeter(a.c) > perimeter(b.c);
-                else
-                  return false;
-              });
+    // duplicates: sort by id and, within an id, largest perimeter first.
+    // Quads decoded only by the second reading are sorted apart and merged
+    // after those of the reference reading (inplace_merge is stable), so the
+    // reference candidates are ordered exactly as before and a level the
+    // reference finds keeps exactly its corners.
+    auto by_size = [](const Candidate &a, const Candidate &b) {
+      if (a.id < b.id)
+        return true;
+      else if (a.id == b.id)
+        return perimeter(a.c) > perimeter(b.c);
+      else
+        return false;
+    };
+    const auto mid =
+        std::stable_partition(cands_.begin(), cands_.end(),
+                              [](const Candidate &c) { return !c.reread; });
+    std::sort(cands_.begin(), mid, by_size);
+    std::sort(mid, cands_.end(), by_size);
+    std::inplace_merge(
+        cands_.begin(), mid, cands_.end(),
+        [](const Candidate &a, const Candidate &b) { return a.id < b.id; });
     // A smaller candidate of the same id whose centre lies outside the
     // largest one is another copy of the marker (the same square seen twice,
     // e.g. both borders of its black frame, is nested instead).
@@ -1278,21 +1298,56 @@ private:
     const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
     const double *h = Hm.ptr<double>(0);
-    for (const Group &g : groups_) {
+    bool second[16] = {}; // grid sizes worth a second reading
+    for (size_t gi = 0; gi < groups_.size(); gi++) {
+      const Group &g = groups_[gi];
       const int n = g.n;
       uint8_t bits[18 * 18];
       const double mean = double(sample(h, n, bits)) / double(n * n);
-      for (int i = 0; i < n * n; i++)
-        bits[i] = bits[i] > mean ? 255 : 0;
+      int hi = 0, lo = 0, nhi = 0;
+      for (int i = 0; i < n * n; i++) {
+        const bool b = bits[i] > mean;
+        (b ? hi : lo) += bits[i];
+        nhi += b;
+        bits[i] = b ? 255 : 0;
+      }
       int nrot = 0;
       const int id = marker_id(bits, n, g, nrot);
-      if (id == -1)
+      if (id == -1) {
+        // a clear dark/bright split: uniform blobs and holes are skipped
+        second[gi] = nhi > 0 && nhi < n * n &&
+                     hi * (n * n - nhi) - lo * nhi >=
+                         kRereadContrast * nhi * (n * n - nhi);
         continue;
+      }
       // (the reference rotates its working copy in place, so a second matching
       // grid size sees the already-rotated corners)
       std::rotate(mc, mc + 4 - nrot, mc + 4);
       Candidate &cand = out[nout++];
       cand.id = id;
+      cand.reread = false;
+      std::copy(mc, mc + 4, cand.c);
+    }
+    if (nout > 0)
+      return nout;
+    // Second reading, only for quads no grid size decoded: exact sampling,
+    // then refined corners.
+    cv::Point2f rc[4];
+    bool have_rc = false;
+    for (size_t gi = 0; gi < groups_.size(); gi++) {
+      if (!second[gi])
+        continue;
+      const Group &g = groups_[gi];
+      int nrot = 0;
+      const int id = reread(h, mc, rc, have_rc, g.n, g, nrot);
+      if (id == -1)
+        continue;
+      std::rotate(mc, mc + 4 - nrot, mc + 4);
+      if (have_rc)
+        std::rotate(rc, rc + 4 - nrot, rc + 4);
+      Candidate &cand = out[nout++];
+      cand.id = id;
+      cand.reread = true;
       std::copy(mc, mc + 4, cand.c);
     }
     return nout;
@@ -1320,15 +1375,17 @@ private:
   // diagnose(): fills border/bit errors and contrast of quad q for the grid
   // size of its decoded code, or (pick) for the closest grid size and code,
   // also setting q.c (clockwise, image coordinates), cells and nearest_id.
+  // Both readings (reference and second) are scored; the closer one counts.
   void examine(const std::vector<cv::Point> &quad, QuadInfo &q,
                bool pick) const {
-    cv::Point2f mc[4];
+    cv::Point2f mc[4], rc[4];
     for (int j = 0; j < 4; j++)
       mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
     const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
     const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
     if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
       std::swap(mc[1], mc[3]);
+    refine(proc_, mc, rc);
     const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
     const double *h = Hm.ptr<double>(0);
@@ -1337,60 +1394,154 @@ private:
       if (!pick && g.n != q.cells)
         continue;
       const int n = g.n, sz = n - 2;
-      uint8_t raw[18 * 18], bits[18 * 18];
-      const double mean = double(sample(h, n, raw)) / double(n * n);
-      double hi = 0, lo = 0;
-      int nhi = 0;
-      for (int i = 0; i < n * n; i++) {
-        bits[i] = raw[i] > mean ? 255 : 0;
-        if (bits[i]) {
-          hi += raw[i];
-          nhi++;
-        } else
-          lo += raw[i];
-      }
-      int border = 0;
-      for (int r = 0; r < n; r++)
-        for (int c = 0; c < n; c++)
-          if ((r == 0 || c == 0 || r == n - 1 || c == n - 1) && bits[r * n + c])
-            border++;
-      uint8_t inner[256], tmp[256];
-      for (int r = 0; r < sz; r++)
-        for (int c = 0; c < sz; c++)
-          inner[r * sz + c] = bits[(r + 1) * n + c + 1];
-      int wrong = INT_MAX, id = -1;
-      for (int rot = 0; rot < 4; rot++) {
-        for (const Code &code : g.codes) {
-          if (!pick && code.id != q.nearest_id)
-            continue;
-          int e = 0;
-          for (int i = 0; i < sz * sz; i++)
-            e += code.mask[i] && inner[i] != code.bits[i];
-          if (e < wrong) {
-            wrong = e;
-            id = code.id;
-          }
+      float val[2][18 * 18];
+      double mean[2];
+      uint8_t raw[18 * 18];
+      mean[0] = double(sample(h, n, raw)) / double(n * n);
+      for (int i = 0; i < n * n; i++)
+        val[0][i] = raw[i];
+      mean[1] = exact_values(rc, n, val[1]);
+      for (int k = 0; k < 2; k++) {
+        uint8_t bits[18 * 18];
+        double hi = 0, lo = 0;
+        int nhi = 0;
+        for (int i = 0; i < n * n; i++) {
+          bits[i] = val[k][i] > mean[k] ? 255 : 0;
+          if (bits[i]) {
+            hi += val[k][i];
+            nhi++;
+          } else
+            lo += val[k][i];
         }
-        for (int i = 0; i < sz; i++)
-          for (int j = 0; j < sz; j++)
-            tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
-        std::memcpy(inner, tmp, (size_t)sz * sz);
+        int border = 0;
+        for (int r = 0; r < n; r++)
+          for (int c = 0; c < n; c++)
+            if ((r == 0 || c == 0 || r == n - 1 || c == n - 1) &&
+                bits[r * n + c])
+              border++;
+        uint8_t inner[256], tmp[256];
+        for (int r = 0; r < sz; r++)
+          for (int c = 0; c < sz; c++)
+            inner[r * sz + c] = bits[(r + 1) * n + c + 1];
+        int wrong = INT_MAX, id = -1;
+        for (int rot = 0; rot < 4; rot++) {
+          for (const Code &code : g.codes) {
+            if (!pick && code.id != q.nearest_id)
+              continue;
+            int e = 0;
+            for (int i = 0; i < sz * sz; i++)
+              e += code.mask[i] && inner[i] != code.bits[i];
+            if (e < wrong) {
+              wrong = e;
+              id = code.id;
+            }
+          }
+          for (int i = 0; i < sz; i++)
+            for (int j = 0; j < sz; j++)
+              tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
+          std::memcpy(inner, tmp, (size_t)sz * sz);
+        }
+        if (border + wrong >= best)
+          continue;
+        best = border + wrong;
+        q.cells = n;
+        q.border_errors = border;
+        q.bit_errors = wrong;
+        q.nearest_id = id;
+        q.contrast =
+            nhi > 0 && nhi < n * n ? float(hi / nhi - lo / (n * n - nhi)) : 0.f;
       }
-      if (border + wrong >= best)
-        continue;
-      best = border + wrong;
-      q.cells = n;
-      q.border_errors = border;
-      q.bit_errors = wrong;
-      q.nearest_id = id;
-      q.contrast =
-          nhi > 0 && nhi < n * n ? float(hi / nhi - lo / (n * n - nhi)) : 0.f;
     }
     if (pick) {
       const float inv_scale = 1.f / scale_;
       for (int k = 0; k < 4; k++)
         q.c[k] = mc[k] * inv_scale;
     }
+  }
+
+  // Bilinear sample with pixel centres at integer coordinates (clamped).
+  static float bilinear(const cv::Mat &im, float x, float y) {
+    x = std::min(std::max(x, 0.f), float(im.cols - 1));
+    y = std::min(std::max(y, 0.f), float(im.rows - 1));
+    const int x0 = (int)x, y0 = (int)y;
+    const int x1 = std::min(x0 + 1, im.cols - 1),
+              y1 = std::min(y0 + 1, im.rows - 1);
+    const float fx = x - x0, fy = y - y0;
+    const uchar *a = im.ptr<uchar>(y0), *b = im.ptr<uchar>(y1);
+    return (1 - fy) * ((1 - fx) * a[x0] + fx * a[x1]) +
+           fy * ((1 - fx) * b[x0] + fx * b[x1]);
+  }
+
+  // Second reading of a quad the reference reader rejected: each cell read
+  // by plain bilinear interpolation at its centre, first on the contour
+  // corners, then on corners refined to sub-pixel. The reference
+  // getSubpixelValue samples up to a pixel off the centre, which at 2-4 px
+  // per cell lands in the neighbouring cell.
+  int reread(const double *h, const cv::Point2f *mc, cv::Point2f *rc,
+             bool &have_rc, int n, const Group &g, int &nrot) const {
+    float val[18 * 18];
+    uint8_t bits[18 * 18];
+    double mean = exact_values(h, n, val);
+    for (int i = 0; i < n * n; i++)
+      bits[i] = val[i] > mean ? 255 : 0;
+    int id = marker_id(bits, n, g, nrot);
+    if (id != -1)
+      return id;
+    // refine only quads that read like a marker: clear contrast and a
+    // nearly black border (cornerSubPix costs ~10 us per corner)
+    double hi = 0, lo = 0;
+    int nhi = 0, border = 0;
+    for (int i = 0; i < n * n; i++) {
+      if (bits[i]) {
+        hi += val[i];
+        nhi++;
+      } else
+        lo += val[i];
+      const int r = i / n, c = i % n;
+      border += bits[i] && (r == 0 || c == 0 || r == n - 1 || c == n - 1);
+    }
+    if (nhi == 0 || nhi == n * n ||
+        hi / nhi - lo / (n * n - nhi) < kRereadContrast || 4 * border > n)
+      return -1;
+    if (!have_rc) {
+      refine(proc_, mc, rc);
+      have_rc = true;
+    }
+    mean = exact_values(rc, n, val);
+    for (int i = 0; i < n * n; i++)
+      bits[i] = val[i] > mean ? 255 : 0;
+    return marker_id(bits, n, g, nrot);
+  }
+
+  // Cell-centre values of an n x n grid on quad rc; returns their mean.
+  double exact_values(const cv::Point2f *rc, int n, float *val) const {
+    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const cv::Mat Hm = cv::getPerspectiveTransform(unit, rc);
+    return exact_values(Hm.ptr<double>(0), n, val);
+  }
+  // ... through homography h (unit square -> image).
+  double exact_values(const double *h, int n, float *val) const {
+    double sum = 0;
+    for (int r = 0; r < n; r++)
+      for (int c = 0; c < n; c++) {
+        const double px = (c + 0.5) / n, py = (r + 0.5) / n;
+        const double a = h[0] * px + h[1] * py + h[2];
+        const double b = h[3] * px + h[4] * py + h[5];
+        const double w = h[6] * px + h[7] * py + h[8];
+        val[r * n + c] = bilinear(proc_, float(a / w), float(b / w));
+        sum += val[r * n + c];
+      }
+    return sum / (n * n);
+  }
+
+  static void refine(const cv::Mat &im, const cv::Point2f *in,
+                     cv::Point2f *out) {
+    std::vector<cv::Point2f> v(in, in + 4);
+    cv::cornerSubPix(
+        im, v, cv::Size(2, 2), cv::Size(-1, -1),
+        cv::TermCriteria(cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 10,
+                         0.01));
+    std::copy(v.begin(), v.end(), out);
   }
 
   // FractalMarkerDetector::getMarkerId on an n x n 0/255 grid.
