@@ -69,6 +69,20 @@ print(det.detect(twice).multiple_instances, det.detect(page).multiple_instances)
 With `FractalTracker` or an ROI only the copies inside the searched region
 are seen.
 
+To use every copy, ask for all of them: `all_instances=True` returns the
+levels of all copies, `res.instances` says which copy each level belongs to
+(0 = the largest) and `res.instance(k)` is copy `k` alone — pass it to
+`estimate_pose` for that copy's pose. Levels are grouped by geometry (the
+largest level of a copy predicts where its smaller levels are), not by
+distance.
+
+```python
+both = det.detect(twice, all_instances=True)
+print(both.n_instances, both.instances)        # 2 [0 0 0 0 1 1 1 1]
+first = both.instance(0)                       # a DetectionResult of copy 0
+print(first.ids, first.corners[0, 0])
+```
+
 ### Levels that do not fit
 
 All levels of one marker lie on one plane, so the corners of a larger level

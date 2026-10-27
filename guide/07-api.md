@@ -16,7 +16,7 @@ FractalDetector(config, marker_size=-1.0, params=None)
 
 | method | returns |
 |---|---|
-| `detect(image, with_inner_points=False, roi=None)` | `DetectionResult` |
+| `detect(image, with_inner_points=False, roi=None, all_instances=False)` | `DetectionResult`; with `all_instances=True` every copy of the marker, see `instances` |
 | `diagnose(image, roi=None)` | `Diagnosis(result, n_contours, n_not_quad, quads)` — see [Troubleshooting](08-troubleshooting.md#why-a-candidate-was-dropped) |
 | `detect_batch(images, num_threads=0, roi=None)` | `list[DetectionResult]` (no inner points) |
 | `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False, full=False)` | `(rvec, tvec, reproj_err)`, a `Pose` with `full=True`, or `None` |
@@ -61,10 +61,14 @@ wide; only when the detector's own `detection_scale` is 1.
 | `points_2d` | float32 `(M, 2)` or `None` — inner+outer image points |
 | `points_3d` | float32 `(M, 3)` or `None` — matching marker points, z = 0 |
 | `points_level` | int32 `(M,)` or `None` — level id of each point |
+| `instances` | int32 `(N,)` or `None` — copy of each level (`all_instances=True`; 0 = the largest copy) |
+| `points_instance` | int32 `(M,)` or `None` — copy of each inner point |
 | `multiple_instances` | `bool` — a level was seen in two separate places (two copies of the marker); only the largest of each level is returned |
 | `inconsistent_ids` | int32 `(K,)` — levels dropped because they are not where the other levels put them |
 
-`len(r)`, `bool(r)`, `for level_id, corners in r`, readable `repr`.
+`len(r)`, `bool(r)`, `for level_id, corners in r`, readable `repr`;
+`r.n_instances`, `r.instance(k)` (copy `k` as its own `DetectionResult`).
+`estimate_pose` refuses a result with several copies — pass `r.instance(k)`.
 
 ## Diagnosis
 

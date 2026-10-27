@@ -192,9 +192,42 @@ class DetectionResult:
     inconsistent_ids: np.ndarray = field(default_factory=lambda: np.zeros(0, np.int32))
     # Level id of every row of points_2d / points_3d (with_inner_points only).
     points_level: np.ndarray | None = None  # int32 (M,)
+    # detect(..., all_instances=True) only: the copy of the marker each level
+    # (instances) and each inner point (points_instance) belongs to.
+    instances: np.ndarray | None = None  # int32 (N,), 0 = the largest copy
+    points_instance: np.ndarray | None = None  # int32 (M,)
 
     def __len__(self) -> int:
         return int(self.ids.shape[0])
+
+    @property
+    def n_instances(self) -> int:
+        """Copies of the marker found (``all_instances=True``); else 0 or 1."""
+        if self.instances is None:
+            return 1 if len(self) else 0
+        return int(self.instances.max()) + 1 if len(self.instances) else 0
+
+    def instance(self, k: int) -> DetectionResult:
+        """Copy ``k`` of the marker alone (``detect(..., all_instances=True)``)."""
+        if self.instances is None:
+            raise ValueError("instance() needs detect(..., all_instances=True)")
+        if not 0 <= k < self.n_instances:
+            raise IndexError(f"instance {k} of {self.n_instances}")
+        sel = self.instances == k
+        p2d = p3d = lv = None
+        if self.points_2d is not None and self.points_instance is not None:
+            psel = self.points_instance == k
+            p2d = self.points_2d[psel]
+            p3d = self.points_3d[psel] if self.points_3d is not None else None
+            lv = self.points_level[psel] if self.points_level is not None else None
+        return DetectionResult(
+            ids=self.ids[sel],
+            corners=self.corners[sel],
+            points_2d=p2d,
+            points_3d=p3d,
+            multiple_instances=self.n_instances > 1,
+            points_level=lv,
+        )
 
     def __bool__(self) -> bool:
         return len(self) > 0
@@ -280,21 +313,45 @@ class FractalDetector:
         image: np.ndarray,
         with_inner_points: bool = False,
         roi: "tuple[int, int, int, int] | None" = None,
+        all_instances: bool = False,
     ) -> DetectionResult:
+        """Detect the marker levels in ``image``.
+
+        ``all_instances=True`` keeps every copy of the marker in view: the
+        result then lists all levels of all copies, ``instances`` gives the
+        copy of each level (0 = the largest copy) and ``result.instance(k)``
+        is copy ``k`` alone, ready for :meth:`estimate_pose`. By default only
+        the largest of each level is returned (``instances`` is ``None``).
+        """
         _validate_params(self._d.params)
+        multi_ok = bool(all_instances)
         if roi is not None:
             rx, ry, rw, rh = _validate_roi(roi, image)
-            if with_inner_points:
-                ids, corners, p2d, p3d, multi, drop, lv = self._d.detect_full(image, rx, ry, rw, rh)
-                return DetectionResult(ids, corners, p2d, p3d, multi, drop, lv)
-            ids, corners, multi, drop = self._d.detect(image, rx, ry, rw, rh)
+            box: tuple[int, ...] = (rx, ry, rw, rh)
         else:
-            if with_inner_points:
-                ids, corners, p2d, p3d, multi, drop, lv = self._d.detect_full(image)
-                return DetectionResult(ids, corners, p2d, p3d, multi, drop, lv)
-            ids, corners, multi, drop = self._d.detect(image)
+            box = (-1, -1, -1, -1)
+        if with_inner_points:
+            ids, corners, p2d, p3d, multi, drop, lv, inst, pinst = self._d.detect_full(
+                image, *box, multi_ok
+            )
+            return DetectionResult(
+                ids,
+                corners,
+                p2d,
+                p3d,
+                multi,
+                drop,
+                lv,
+                inst if multi_ok else None,
+                pinst if multi_ok else None,
+            )
+        ids, corners, multi, drop, inst = self._d.detect(image, *box, multi_ok)
         return DetectionResult(
-            ids=ids, corners=corners, multiple_instances=multi, inconsistent_ids=drop
+            ids=ids,
+            corners=corners,
+            multiple_instances=multi,
+            inconsistent_ids=drop,
+            instances=inst if multi_ok else None,
         )
 
     def diagnose(
@@ -400,6 +457,11 @@ class FractalDetector:
         through the fisheye model before solving and the reprojection error is
         measured against the original observations with fisheye projection.
         """
+        if result.instances is not None and result.n_instances > 1:
+            raise ValueError(
+                "the result holds several copies of the marker: "
+                "estimate_pose(result.instance(k), ...) for copy k"
+            )
         cam = np.ascontiguousarray(camera_matrix, dtype=np.float64)
         dist = np.ascontiguousarray(dist_coeffs, dtype=np.float64)
         _validate_camera(cam, dist)

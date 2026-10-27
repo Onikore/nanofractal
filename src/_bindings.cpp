@@ -76,6 +76,10 @@ static void fill(const std::vector<Detection> &markers,
   }
 }
 
+static nb::object int_array(const std::vector<int> &v) {
+  return nb::cast(ids_to_numpy(std::vector<int32_t>(v.begin(), v.end())));
+}
+
 static nb::object dropped_ids(const FastFractalDetector &d) {
   std::vector<int32_t> v(d.inconsistent_ids().begin(),
                          d.inconsistent_ids().end());
@@ -87,7 +91,9 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
                              const std::vector<cv::Point2f> &p2d,
                              const std::vector<cv::Point3f> &p3d, float ox,
                              float oy, bool multiple, nb::object dropped,
-                             const std::vector<int> &levels) {
+                             const std::vector<int> &levels,
+                             const std::vector<int> &inst = {},
+                             const std::vector<int> &pinst = {}) {
   size_t n = ids.size();
   size_t m2 = p2d.size();
   std::vector<int32_t> lv(levels.begin(), levels.end());
@@ -99,11 +105,11 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
     pts3[i * 3 + 1] = p3d[i].y;
     pts3[i * 3 + 2] = p3d[i].z;
   }
-  return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                        corners_to_numpy(std::move(corners), n),
-                        make_owned<float>(std::move(pts2), {m2, (size_t)2}),
-                        make_owned<float>(std::move(pts3), {m2, (size_t)3}),
-                        multiple, dropped, ids_to_numpy(std::move(lv)));
+  return nb::make_tuple(
+      ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
+      make_owned<float>(std::move(pts2), {m2, (size_t)2}),
+      make_owned<float>(std::move(pts3), {m2, (size_t)3}), multiple, dropped,
+      ids_to_numpy(std::move(lv)), int_array(inst), int_array(pinst));
 }
 
 struct FractalDetectorImpl {
@@ -133,16 +139,18 @@ struct FractalDetectorImpl {
   FastFractalDetector &detector(size_t t) {
     pool[t]->params = params;
     pool[t]->serial = false;
+    pool[t]->all_instances = false;
     return *pool[t];
   }
 
   nb::tuple detect(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
-                   int rh = -1) {
+                   int rh = -1, bool all_instances = false) {
     cv::Mat im = as_image(arr);
     bool has_roi = (rw > 0 && rh > 0);
     cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
     std::vector<Detection> markers;
     FastFractalDetector &d = detector(0);
+    d.all_instances = all_instances;
     {
       nb::gil_scoped_release rel;
       d.detect(work, markers);
@@ -153,9 +161,9 @@ struct FractalDetectorImpl {
     fill(markers, ids, corners, has_roi ? (float)rx : 0.f,
          has_roi ? (float)ry : 0.f);
     size_t n = ids.size();
-    return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                          corners_to_numpy(std::move(corners), n),
-                          d.multiple_instances(), dropped_ids(d));
+    return nb::make_tuple(
+        ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
+        d.multiple_instances(), dropped_ids(d), int_array(d.instances()));
   }
 
   // detect + why every convex quad was kept or dropped (debug aid):
@@ -207,7 +215,7 @@ struct FractalDetectorImpl {
   // detect + all visible (inner) corner correspondences for occlusion-robust
   // pose: returns (ids, corners, points_2d (M,2), points_3d (M,3)).
   nb::tuple detect_full(RawArray arr, int rx = -1, int ry = -1, int rw = -1,
-                        int rh = -1) {
+                        int rh = -1, bool all_instances = false) {
     cv::Mat im = as_image(arr);
     bool has_roi = (rw > 0 && rh > 0);
     cv::Mat work = has_roi ? im(cv::Rect(rx, ry, rw, rh)) : im;
@@ -215,6 +223,7 @@ struct FractalDetectorImpl {
     std::vector<cv::Point3f> p3d;
     std::vector<cv::Point2f> p2d;
     FastFractalDetector &d = detector(0);
+    d.all_instances = all_instances;
     {
       nb::gil_scoped_release rel;
       d.detect(work, markers, p3d, p2d);
@@ -224,8 +233,8 @@ struct FractalDetectorImpl {
     std::vector<float> corners;
     fill(markers, ids, corners, ox, oy);
     return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy,
-                       d.multiple_instances(), dropped_ids(d),
-                       d.points_level());
+                       d.multiple_instances(), dropped_ids(d), d.points_level(),
+                       d.instances(), d.points_instance());
   }
 
   // Parallel batch detection. The detector is not thread-safe, so each worker
@@ -589,10 +598,10 @@ NB_MODULE(_nanofractal, m) {
       .def_rw("params", &FractalDetectorImpl::params)
       .def("detect", &FractalDetectorImpl::detect, nb::arg("image"),
            nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
-           nb::arg("rh") = -1)
+           nb::arg("rh") = -1, nb::arg("all_instances") = false)
       .def("detect_full", &FractalDetectorImpl::detect_full, nb::arg("image"),
            nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
-           nb::arg("rh") = -1)
+           nb::arg("rh") = -1, nb::arg("all_instances") = false)
       .def("diagnose", &FractalDetectorImpl::diagnose, nb::arg("image"),
            nb::arg("rx") = -1, nb::arg("ry") = -1, nb::arg("rw") = -1,
            nb::arg("rh") = -1)

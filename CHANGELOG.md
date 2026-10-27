@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers), so `ids` and inner points can grow (R16).
 
 ### Added
+- `detect(..., all_instances=True)`: every copy of the marker in view, its
+  levels grouped by geometry (the largest level of a copy predicts its
+  smaller ones); `DetectionResult.instances` / `points_instance`,
+  `n_instances`, `instance(k)` for one copy (pose per copy). The default
+  (largest of each level) is unchanged (R8).
 - `FractalTracker(..., auto_scale=True, scale_target_px=400)`: also shrinks
   the searched region from the previous marker size (down to 0.35); corners
   are refined on the full frame and stay as accurate. 4K synthetic video:
@@ -92,6 +97,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   results differ from 0.6.1 only by rounding-level amounts (< 1e-3 rad).
 
 ### Fixed
+- `inconsistent_ids` could keep the previous frame's value on a frame with
+  no candidate quad.
 - `estimate_pose` without inner points treated the first detected level as
   the external marker: when only an inner level was visible, the distance was
   wrong by the ratio of the level sizes (×7 for the innermost level of

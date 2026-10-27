@@ -80,8 +80,24 @@ class FractalDetector:
     def params(self) -> DetectorParams: ...
     @params.setter
     def params(self, arg: DetectorParams, /) -> None: ...
-    def detect(self, image: NDArray) -> tuple: ...
-    def detect_full(self, image: NDArray) -> tuple: ...
+    def detect(
+        self,
+        image: NDArray,
+        rx: int = -1,
+        ry: int = -1,
+        rw: int = -1,
+        rh: int = -1,
+        all_instances: bool = False,
+    ) -> tuple: ...
+    def detect_full(
+        self,
+        image: NDArray,
+        rx: int = -1,
+        ry: int = -1,
+        rw: int = -1,
+        rh: int = -1,
+        all_instances: bool = False,
+    ) -> tuple: ...
     def diagnose(
         self, image: NDArray, rx: int = -1, ry: int = -1, rw: int = -1, rh: int = -1
     ) -> tuple: ...

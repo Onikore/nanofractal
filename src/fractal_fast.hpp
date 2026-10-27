@@ -1148,9 +1148,35 @@ public:
     to_gray(img);
     detect_gray(out);
     plevel_.clear();
-    if (!out.empty())
+    pinst_.clear();
+    if (out.empty())
+      return;
+    if (!all_instances) {
       inner_points(out, p3d, p2d);
+      return;
+    }
+    // one copy at a time: each with its own homography and keypoints
+    std::vector<Detection> one;
+    for (size_t i = 0; i < out.size();) {
+      size_t j = i;
+      while (j < out.size() && inst_[j] == inst_[i])
+        j++;
+      one.assign(out.begin() + i, out.begin() + j);
+      inner_points(one, p3d, p2d);
+      pinst_.resize(p2d.size(), inst_[i]);
+      i = j;
+    }
   }
+
+  // true: keep every copy of the marker (detect() then returns all levels of
+  // all copies, grouped by instances()); false: the largest of each level.
+  bool all_instances = false;
+
+  // Copy (instance) index of every returned level with all_instances; copies
+  // are numbered by size, 0 = the largest.
+  const std::vector<int> &instances() const { return inst_; }
+  // Copy index of every inner point with all_instances.
+  const std::vector<int> &points_instance() const { return pinst_; }
 
   const nanofractal::FractalMarkerSet &marker_set() const { return set_; }
 
@@ -1270,6 +1296,7 @@ private:
     out.clear();
     cands_.clear();
     multiple_ = false;
+    dropped_.clear();
     float scale = params.detection_scale;
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
@@ -1374,10 +1401,30 @@ private:
       while (j < cands_.size() && cands_[j].id == cands_[i].id)
         j++;
     }
-    auto ip = std::unique(
-        cands_.begin(), cands_.end(),
-        [](const Candidate &a, const Candidate &b) { return a.id == b.id; });
-    cands_.resize(std::distance(cands_.begin(), ip));
+    if (all_instances) {
+      // drop only the same square seen twice (centre inside a larger kept
+      // candidate of the same id); separate copies stay
+      size_t w = 0;
+      for (size_t i = 0, j; i < cands_.size(); i = j) {
+        const size_t w0 = w;
+        for (j = i; j < cands_.size() && cands_[j].id == cands_[i].id; j++) {
+          const cv::Point2f *c = cands_[j].c;
+          const cv::Point2f ctr = (c[0] + c[1] + c[2] + c[3]) * 0.25f;
+          bool dup = false;
+          for (size_t k = w0; k < w && !dup; k++)
+            dup = inside(cands_[k].c, ctr);
+          if (!dup)
+            cands_[w++] = cands_[j];
+        }
+      }
+      cands_.resize(w);
+    } else {
+      auto ip = std::unique(
+          cands_.begin(), cands_.end(),
+          [](const Candidate &a, const Candidate &b) { return a.id == b.id; });
+      cands_.resize(std::distance(cands_.begin(), ip));
+    }
+    inst_.clear();
     if (cands_.empty())
       return;
 
@@ -1402,7 +1449,95 @@ private:
       for (int c = 0; c < 4; c++)
         out[i].corners[c] = corners_[i * 4 + c];
     }
-    check_levels(out);
+    if (all_instances)
+      group_instances(out);
+    else
+      check_levels(out);
+  }
+
+  // all_instances: the levels of one copy lie on one plane, so its largest
+  // level predicts each smaller one (the check_levels() tolerance). From the
+  // largest level down, a level joins the first copy that has no level of
+  // its id yet and predicts it, or else starts a new copy. out is reordered
+  // by (copy, id); inst_ holds the copy indices.
+  void group_instances(std::vector<Detection> &out) {
+    const int N = (int)out.size();
+    std::vector<float> side(N);
+    for (int i = 0; i < N; i++)
+      side[i] = mean_side(out[i].corners);
+    std::vector<int> order(N);
+    for (int i = 0; i < N; i++)
+      order[i] = i;
+    std::stable_sort(order.begin(), order.end(),
+                     [&](int a, int b) { return side[a] > side[b]; });
+    struct Copy {
+      std::vector<int> members;
+      cv::Mat H; // largest level: marker plane -> image
+    };
+    std::vector<Copy> copies;
+    std::vector<int> of(N, -1);
+    for (int i : order) {
+      for (size_t c = 0; c < copies.size() && of[i] < 0; c++) {
+        Copy &cp = copies[c];
+        bool has = false;
+        for (int m : cp.members)
+          has |= out[m].id == out[i].id;
+        if (!has && predicts(cp.H, out[i], side[i])) {
+          cp.members.push_back(i);
+          of[i] = (int)c;
+        }
+      }
+      if (of[i] < 0) {
+        Copy cp;
+        cp.members.push_back(i);
+        cp.H = plane_to_image(out[i]);
+        of[i] = (int)copies.size();
+        copies.push_back(std::move(cp));
+      }
+    }
+    std::vector<int> idx(N);
+    for (int i = 0; i < N; i++)
+      idx[i] = i;
+    std::stable_sort(idx.begin(), idx.end(), [&](int a, int b) {
+      return of[a] != of[b] ? of[a] < of[b] : out[a].id < out[b].id;
+    });
+    std::vector<Detection> sorted(N);
+    inst_.resize(N);
+    for (int i = 0; i < N; i++) {
+      sorted[i] = out[idx[i]];
+      inst_[i] = of[idx[i]];
+    }
+    out.swap(sorted);
+    multiple_ = copies.size() > 1;
+    dropped_.clear();
+  }
+
+  static float mean_side(const cv::Point2f *c) {
+    return 0.25f * float(cv::norm(c[0] - c[1]) + cv::norm(c[1] - c[2]) +
+                         cv::norm(c[2] - c[3]) + cv::norm(c[3] - c[0]));
+  }
+
+  cv::Mat plane_to_image(const Detection &d) const {
+    cv::Point2f plane[4];
+    const auto &k = set_.fractalMarkerCollection.at(d.id).keypts;
+    for (int c = 0; c < 4; c++)
+      plane[c] = k[c].pt;
+    return cv::getPerspectiveTransform(plane, d.corners);
+  }
+
+  // Does homography H (marker plane -> image) put level d where it was seen?
+  bool predicts(const cv::Mat &H, const Detection &d, float side_d) const {
+    const double *h = H.ptr<double>(0);
+    const auto &kb = set_.fractalMarkerCollection.at(d.id).keypts;
+    float err = 0.f;
+    for (int c = 0; c < 4; c++) {
+      const double x = kb[c].pt.x, y = kb[c].pt.y;
+      const double w = h[6] * x + h[7] * y + h[8];
+      const cv::Point2f p(float((h[0] * x + h[1] * y + h[2]) / w),
+                          float((h[3] * x + h[4] * y + h[5]) / w));
+      err = std::max(err, float(cv::norm(p - d.corners[c])));
+    }
+    return err <= kLevelTolPx + kLevelTolRel * side_d;
   }
 
   static int popcount16(uint16_t v) {
@@ -1830,7 +1965,7 @@ private:
   void inner_points(const std::vector<Detection> &det,
                     std::vector<cv::Point3f> &p3d,
                     std::vector<cv::Point2f> &p2d) {
-    plevel_.clear();
+    const size_t first = p2d.size(); // points added by this call
     std::vector<cv::Point2f> imgpoints;
     std::vector<cv::Point3f> objpoints;
     for (const Detection &m : det) {
@@ -1920,11 +2055,17 @@ private:
       }
     }
     const int sp = subpix();
-    if (!p2d.empty() && sp > 0)
-      cv::cornerSubPix(
-          gray_, p2d, cv::Size(sp, sp), cv::Size(-1, -1),
-          cv::TermCriteria(cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
-                           12, 0.005));
+    if (p2d.size() > first && sp > 0) {
+      const cv::TermCriteria tc(
+          cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005);
+      if (first == 0)
+        cv::cornerSubPix(gray_, p2d, cv::Size(sp, sp), cv::Size(-1, -1), tc);
+      else { // refine only this call's points
+        std::vector<cv::Point2f> v(p2d.begin() + first, p2d.end());
+        cv::cornerSubPix(gray_, v, cv::Size(sp, sp), cv::Size(-1, -1), tc);
+        std::copy(v.begin(), v.end(), p2d.begin() + first);
+      }
+    }
   }
 
   // true when two points are closer than sqrt(lim2) (the reference's O(n^2)
@@ -2108,8 +2249,9 @@ private:
 
   bool multiple_ = false;
   float scale_ = 1.f;
-  std::vector<int> dropped_; // levels removed by check_levels()
-  std::vector<int> plevel_;  // level of each inner point
+  std::vector<int> dropped_;      // levels removed by check_levels()
+  std::vector<int> plevel_;       // level of each inner point
+  std::vector<int> inst_, pinst_; // copy of each level / inner point
   nanofractal::FractalMarkerSet set_;
   std::vector<Group> groups_;
   AdaptiveThreshold thresh_;
