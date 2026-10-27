@@ -694,6 +694,26 @@ NB_MODULE(_nanofractal, m) {
     return nb::make_tuple(mx, cv::countNonZero(d), true);
   });
 
+  // Test hook: AdaptiveThreshold (and its neighbour masks) against
+  // cv::adaptiveThreshold(MEAN_C, BINARY_INV) and neighbour_masks(); returns
+  // (pixels that differ, mask entries that differ).
+  m.def("_threshold_diff", [](RawArray arr, int k, double delta, int threads) {
+    cv::Mat im = as_mat(arr);
+    if (im.channels() != 1)
+      throw nb::value_error("expected a single-channel image");
+    nanofractal_fast::AdaptiveThreshold t;
+    t.max_threads = threads;
+    cv::Mat mine, nbm, ref, nbm_ref;
+    t.run(im, k, delta, mine, &nbm);
+    cv::adaptiveThreshold(im, ref, 1, cv::ADAPTIVE_THRESH_MEAN_C,
+                          cv::THRESH_BINARY_INV, k, delta);
+    cv::Mat inner = mine(cv::Rect(1, 1, im.cols, im.rows)), mine8;
+    inner.convertTo(mine8, CV_8U);
+    int bad = cv::countNonZero(mine8 != ref);
+    nanofractal_fast::neighbour_masks(mine, nbm_ref);
+    return nb::make_tuple(bad, cv::countNonZero(nbm != nbm_ref));
+  });
+
   // Test hook: trace a 0/1 uint8 image with the parallel band tracer
   // (band_rows rows per band, all threads) and report whether the contours of
   // length >= min_size equal sequential cv::findContours(RETR_LIST, NONE).

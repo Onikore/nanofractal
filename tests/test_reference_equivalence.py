@@ -136,3 +136,16 @@ def test_area_downscale_matches_opencv(f, size, threads):
     assert same_size
     assert mx <= 1
     assert n <= 0.005 * img.size * f * f
+
+
+@pytest.mark.parametrize("threads", [1, 0])
+@pytest.mark.parametrize("k", [3, 7, 15, 17, 21, 31, 41, 61, 101, 255])
+def test_threshold_matches_opencv(k, threads):
+    # the box sums (any algorithm: they are exact integers) and the rounding
+    # of the mean must reproduce cv::adaptiveThreshold bit for bit
+    for w, h, seed in [(1920, 1080, 1), (1283, 721, 2), (37, 300, 3), (3840, 64, 4)]:
+        img = generate_scene(max(w, 200), max(h, 120), "clutter", seed=seed)
+        img = np.ascontiguousarray(img[:h, :w])
+        for delta in (7.0, 0.0, -3.5):
+            bad, bad_nbm = _nf._threshold_diff(img, k, delta, threads)
+            assert bad == 0 and bad_nbm == 0, (w, h, delta, bad, bad_nbm)

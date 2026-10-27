@@ -15,6 +15,9 @@ def _tracer_matches_findcontours(
 def _area_downscale_diff(
     image: NDArray[numpy.uint8], f: float, threads: int, /
 ) -> tuple[float, int, bool]: ...
+def _threshold_diff(
+    image: NDArray[numpy.uint8], k: int, delta: float, threads: int, /
+) -> tuple[int, int]: ...
 def get_num_threads() -> int: ...
 def _fractal_markers(
     config: str, /

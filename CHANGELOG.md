@@ -62,6 +62,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   be faster (Raspberry Pi 5 numbers) — `guide/05`, README (R15).
 
 ### Performance
+- Adaptive threshold: horizontal box sums from a SIMD prefix scan (AVX2 /
+  NEON; exact in 16-bit arithmetic), results packed straight to int8 in the
+  large-window path, and the neighbour masks computed inside each row stripe
+  while its rows are in cache. One core: `detect` ×1.17–1.34 at 4K,
+  ×1.05–1.12 at 1080p; bit-identical to `cv::adaptiveThreshold` (new direct
+  test, k = 3 … 255) (R7).
 - aarch64: NEON version of the contour-start scan (it had an AVX2 path
   only). GitHub ARM runner, one core: `detect` 1.4–1.85× faster than the
   scalar build, results bit-identical (R4).

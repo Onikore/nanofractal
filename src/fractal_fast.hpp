@@ -256,6 +256,11 @@ public:
     if ((int)scratch_.size() < nstripes)
       scratch_.resize(nstripes);
     const bool small = k * k * 255 <= 65535; // full window sums fit uint16
+    if (nbm) {
+      nbm->create(dst.size(), CV_8UC1);
+      std::memset(nbm->ptr(0), 0, nbm->cols);
+      std::memset(nbm->ptr(nbm->rows - 1), 0, nbm->cols);
+    }
     cv::parallel_for_(
         cv::Range(0, nstripes),
         [&](const cv::Range &rg) {
@@ -263,33 +268,28 @@ public:
             const int y0 = (int)((int64_t)H * i / nstripes),
                       y1 = (int)((int64_t)H * (i + 1) / nstripes);
             if (small)
-              stripe<uint16_t>(src, k, delta, dst, y0, y1, scratch_[i]);
+              stripe<uint16_t>(src, k, delta, dst, y0, y1, scratch_[i], nbm);
             else
-              stripe<uint32_t>(src, k, delta, dst, y0, y1, scratch_[i]);
+              stripe<uint32_t>(src, k, delta, dst, y0, y1, scratch_[i], nbm);
           }
         },
         nstripes);
     (void)r;
-    if (nbm) {
-      nbm->create(dst.size(), CV_8UC1);
-      std::memset(nbm->ptr(0), 0, nbm->cols);
-      std::memset(nbm->ptr(nbm->rows - 1), 0, nbm->cols);
-      cv::Mat &m = *nbm;
-      cv::parallel_for_(
-          cv::Range(1, dst.rows - 1),
-          [&](const cv::Range &rg) {
-            for (int y = rg.start; y < rg.end; y++)
-              neighbour_mask_row(dst, m, y);
-          },
-          nstripes);
-    }
+    // mask rows at the stripe joins: rows y0 and y0 + 1 of every stripe but
+    // the first need a row of the stripe above (stripes are >= 48 rows)
+    if (nbm)
+      for (int i = 1; i < nstripes; i++) {
+        const int y0 = (int)((int64_t)H * i / nstripes);
+        neighbour_mask_row(dst, *nbm, y0);
+        neighbour_mask_row(dst, *nbm, y0 + 1);
+      }
   }
 
 private:
   static constexpr int kStrip = 512;
 
   struct Scratch {
-    std::vector<uint16_t> ring, ext, col;
+    std::vector<uint16_t> ring, ext, col, pre;
     std::vector<int32_t> mask;
     std::vector<uint32_t> pw[9],
         acc; // sized in uint32 units, reused as S arrays
@@ -303,7 +303,7 @@ private:
   // columns replicate at the border, like OpenCV's BORDER_REPLICATE box filter.
   template <typename V>
   static void stripe(const cv::Mat &src, int k, double delta, cv::Mat &dst,
-                     int y0, int y1, Scratch &sc) {
+                     int y0, int y1, Scratch &sc, cv::Mat *nbm) {
     if (y0 >= y1)
       return;
     const int W = src.cols, H = src.rows, r = k / 2;
@@ -333,6 +333,7 @@ private:
     const int R = k + 2; // ring rows: y+r is written while y-r-1 is still read
     sc.ring.resize((size_t)R * W);
     sc.ext.resize(W + 2 * r);
+    sc.pre.resize(W + 2 * r + 1);
     for (auto &v : sc.pw)
       v.resize(std::min(W, kStrip) + 2 * r);
     sc.acc.resize(std::min(W, kStrip) + 2 * r);
@@ -348,6 +349,15 @@ private:
     auto hsum = [scp, &src, hrow, r, W,
                  k](int j) { // horizontal window sums of source row j
       const uint8_t *sp = src.ptr<uint8_t>(j);
+      uint16_t *out = hrow(j);
+#if defined(__AVX2__) || defined(NF_NEON)
+      // window sum = difference of prefix sums; exact modulo 2^16 since a
+      // window sums to at most k * 255 < 65536
+      uint16_t *P = scp->pre.data();
+      prefix_sum(sp, W, r, P);
+      for (int x = 0; x < W; x++)
+        out[x] = (uint16_t)(P[x + k] - P[x]);
+#else
       uint16_t *e = scp->ext.data();
       for (int i = 0; i < r; i++)
         e[i] = sp[0];
@@ -355,12 +365,12 @@ private:
         e[r + x] = sp[x];
       for (int i = 0; i < r; i++)
         e[r + W + i] = sp[W - 1];
-      uint16_t *out = hrow(j);
       for (int x0 = 0; x0 < W; x0 += kStrip) {
         const int w = std::min(kStrip, W - x0);
         const uint16_t *hs = box_row<uint16_t>(*scp, e + x0, w, k);
         std::memcpy(out + x0, hs, w * sizeof(uint16_t));
       }
+#endif
     };
 
     // vertical window of row y0: rows clamp(y0-r .. y0+r)
@@ -399,6 +409,7 @@ private:
         int x = 0;
         int32_t *m = sc.mask.data();
 #if defined(__AVX2__)
+        // (results packed straight to int8)
         // mean = round_half_even(float(s) * float(scale)) exactly like OpenCV's
         // SIMD path (cvtps2dq rounds to nearest even)
         const __m256 vs = _mm256_set1_ps(scalef32);
@@ -413,9 +424,12 @@ private:
           // mean >= t  <=>  !(t > mean)
           const __m256i ge = _mm256_andnot_si256(_mm256_cmpgt_epi32(t, mean),
                                                  _mm256_set1_epi32(1));
-          _mm256_storeu_si256((__m256i *)(m + x), ge);
+          const __m128i p16 = _mm_packs_epi32(_mm256_castsi256_si128(ge),
+                                              _mm256_extracti128_si256(ge, 1));
+          _mm_storel_epi64((__m128i *)(o + x), _mm_packs_epi16(p16, p16));
         }
 #endif
+        const int xs = x; // scalar part: int32 mask, then narrow
         // mean = round_half_even(s * scale) >= T  <=>  p > T - 0.5, or a tie
         // (p == T - 0.5) that rounds up to an even T. Branch-free; int32 mask
         // first, then narrow (GCC will not vectorise a float compare stored
@@ -428,14 +442,68 @@ private:
           const int32_t eq = p == t ? 1 : 0;
           m[x] = gt | (eq & ~T & 1);
         }
-        for (x = 0; x < simd_end; x++)
+        for (x = xs; x < simd_end; x++)
           o[x] = (int8_t)m[x];
         for (x = simd_end; x < W; x++) {
           const int mean = cv::saturate_cast<uchar>(col[x] * scale);
           o[x] = (int8_t)(mean >= px[x] + idelta);
         }
       }
+      // neighbour masks of dst row y while its rows are in cache: row y
+      // needs dst rows y-1 .. y+1, all written by this stripe (or the zero
+      // border) from y0 + 2 on; run() fills the rows at stripe joins
+      if (nbm && y >= (y0 == 0 ? 1 : y0 + 2))
+        neighbour_mask_row(dst, *nbm, y);
     }
+    if (nbm && y1 == H)
+      neighbour_mask_row(dst, *nbm, H);
+  }
+
+  // Prefix sums (mod 2^16) of a source row with r replicated pixels on each
+  // side: P[0] = 0, P[i + 1] = P[i] + e[i] for e = sp[0] x r, sp[0..W),
+  // sp[W-1] x r.
+  static void prefix_sum(const uint8_t *sp, int W, int r, uint16_t *P) {
+    P[0] = 0;
+    for (int i = 1; i <= r; i++)
+      P[i] = (uint16_t)(P[i - 1] + sp[0]);
+    uint16_t *out = P + r + 1;
+    const uint16_t base = P[r];
+    int i = 0;
+#if defined(__AVX2__)
+    // in-lane scan (shifts by 1, 2, 4 elements), lane 0's total into lane 1,
+    // then the running total of the previous block
+    const __m256i last = _mm256_set1_epi16(0x0F0E); // pick element 7 per lane
+    __m256i carry = _mm256_set1_epi16((short)base);
+    for (; i + 16 <= W; i += 16) {
+      __m256i x =
+          _mm256_cvtepu8_epi16(_mm_loadu_si128((const __m128i *)(sp + i)));
+      x = _mm256_add_epi16(x, _mm256_slli_si256(x, 2));
+      x = _mm256_add_epi16(x, _mm256_slli_si256(x, 4));
+      x = _mm256_add_epi16(x, _mm256_slli_si256(x, 8));
+      const __m256i lo = _mm256_permute2x128_si256(x, x, 0x08); // 0 | lane0
+      x = _mm256_add_epi16(x, _mm256_shuffle_epi8(lo, last));
+      x = _mm256_add_epi16(x, carry);
+      _mm256_storeu_si256((__m256i *)(out + i), x);
+      carry = _mm256_shuffle_epi8(_mm256_permute2x128_si256(x, x, 0x11), last);
+    }
+#elif defined(NF_NEON)
+    const uint16x8_t zero = vdupq_n_u16(0);
+    uint16x8_t carry = vdupq_n_u16(base);
+    for (; i + 8 <= W; i += 8) {
+      uint16x8_t x = vmovl_u8(vld1_u8(sp + i));
+      x = vaddq_u16(x, vextq_u16(zero, x, 7));
+      x = vaddq_u16(x, vextq_u16(zero, x, 6));
+      x = vaddq_u16(x, vextq_u16(zero, x, 4));
+      x = vaddq_u16(x, carry);
+      vst1q_u16(out + i, x);
+      carry = vdupq_laneq_u16(x, 7);
+    }
+#endif
+    uint16_t s = i ? out[i - 1] : base;
+    for (; i < W; i++)
+      out[i] = s = (uint16_t)(s + sp[i]);
+    for (int j = 1; j <= r; j++)
+      out[W - 1 + j] = s = (uint16_t)(s + sp[W - 1]);
   }
 
   // Horizontal window sums out[x] = sum_{i<k} c[x+i], x in [0, W). Builds the

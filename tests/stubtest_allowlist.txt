@@ -32,3 +32,4 @@ nanofractal\._nanofractal\.set_num_threads
 nanofractal\._nanofractal\.get_num_threads
 nanofractal\._nanofractal\._tracer_matches_findcontours
 nanofractal\._nanofractal\._area_downscale_diff
+nanofractal\._nanofractal\._threshold_diff
