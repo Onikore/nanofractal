@@ -227,12 +227,12 @@ struct FractalDetectorImpl {
   }
 
   // Single fractal-marker pose via solvePnP (IPPE, planar). Uses the rich
-  // inner+outer correspondences when available (>=4 points); otherwise falls
-  // back to the 4 outer corners with a square of side marker_size. Returns
-  // (rvec(3,), tvec(3,), rms_reproj_px) float64, or None when no marker / <4
-  // pts.
-  nb::object estimate_pose(F32Arr p2d, F32Arr p3d, F32Arr corners, F64Arr cam,
-                           F64Arr dist, bool fisheye = false) {
+  // inner+outer correspondences when available (>=4 points, method "inner");
+  // otherwise the corners of every detected level with their real 3D
+  // coordinates from the config (method "corners"). Returns
+  // (rvec(3,), tvec(3,), rms_reproj_px, method), or None when no marker.
+  nb::object estimate_pose(F32Arr p2d, F32Arr p3d, I32Arr ids, F32Arr corners,
+                           F64Arr cam, F64Arr dist, bool fisheye = false) {
     if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
       throw nb::value_error("camera_matrix must be float64 (3,3)");
     if (dist.ndim() != 1)
@@ -259,18 +259,44 @@ struct FractalDetectorImpl {
                   corners.shape(2) == 2)
                      ? corners.shape(0)
                      : 0;
-      if (N < 1)
+      if (N < 1 || ids.ndim() != 1 || ids.shape(0) != N)
         return nb::none(); // no marker visible
-      float h = (marker_size > 0 ? marker_size : 1.0f) / 2.f;
-      obj = {{-h, h, 0.f}, {h, h, 0.f}, {h, -h, 0.f}, {-h, -h, 0.f}};
-      for (int c = 0; c < 4; c++) // outer corners of the first marker
-        img.emplace_back(corners.data()[c * 2 + 0], corners.data()[c * 2 + 1]);
+      // Level keypoints are in metres when marker_size > 0, otherwise
+      // normalized (external side 2): scale those to an external side of 1.
+      const auto &coll = pool[0]->marker_set().fractalMarkerCollection;
+      const float k = marker_size > 0 ? 1.f : 0.5f;
+      std::vector<int> used;
+      for (size_t i = 0; i < N; i++) {
+        int id = ids.data()[i];
+        auto it = coll.find(id);
+        if (it == coll.end() ||
+            std::find(used.begin(), used.end(), id) != used.end())
+          continue; // unknown id or a second copy of a level
+        used.push_back(id);
+        for (int c = 0; c < 4; c++) {
+          const cv::Point2f &q = it->second.keypts[c].pt;
+          obj.emplace_back(q.x * k, q.y * k, 0.f);
+          img.emplace_back(corners.data()[(i * 4 + c) * 2 + 0],
+                           corners.data()[(i * 4 + c) * 2 + 1]);
+        }
+      }
+      if (obj.empty())
+        return nb::none();
+    }
+    // One level: IPPE_SQUARE wants a square centred on the origin, so solve
+    // for the level's own frame and shift the translation back afterwards.
+    cv::Point3f centre(0.f, 0.f, 0.f);
+    if (!have_inner && obj.size() == 4) {
+      for (const auto &q : obj)
+        centre += q * 0.25f;
+      for (auto &q : obj)
+        q -= centre;
     }
 
-    // Use IPPE_SQUARE for the 4-outer-corner fallback (it is a square and the
-    // solver is more robust); keep IPPE for the rich inner+outer path (general
-    // coplanar, not a square constraint).
-    int solver = have_inner ? cv::SOLVEPNP_IPPE : cv::SOLVEPNP_IPPE_SQUARE;
+    // IPPE_SQUARE for a single level (a square: more robust); IPPE for
+    // several levels or the inner+outer points (general coplanar).
+    int solver = obj.size() == 4 && !have_inner ? cv::SOLVEPNP_IPPE_SQUARE
+                                                : cv::SOLVEPNP_IPPE;
     cv::Mat rvec, tvec;
     double rms = 0;
     bool ok = false;
@@ -291,22 +317,47 @@ struct FractalDetectorImpl {
           img_solve = img;
           dist_solve = distMat;
         }
-        ok = cv::solvePnP(obj, img_solve, camMat, dist_solve, rvec, tvec, false,
-                          solver);
-        if (ok) {
-          // True image-space RMS error vs the ORIGINAL observations.
+        // True image-space RMS error vs the ORIGINAL observations.
+        auto reproj = [&](const cv::Mat &rv, const cv::Mat &tv) {
           std::vector<cv::Point2f> proj;
           if (fisheye)
             cv::fisheye::projectPoints(cv::Mat(obj).reshape(3, (int)obj.size()),
-                                       proj, rvec, tvec, camMat, distMat);
+                                       proj, rv, tv, camMat, distMat);
           else
-            cv::projectPoints(obj, rvec, tvec, camMat, distMat, proj);
+            cv::projectPoints(obj, rv, tv, camMat, distMat, proj);
           double se = 0;
           for (size_t i = 0; i < proj.size(); i++) {
             double dx = proj[i].x - img[i].x, dy = proj[i].y - img[i].y;
             se += dx * dx + dy * dy;
           }
-          rms = std::sqrt(se / (double)proj.size());
+          return std::sqrt(se / (double)proj.size());
+        };
+        ok = cv::solvePnP(obj, img_solve, camMat, dist_solve, rvec, tvec, false,
+                          solver);
+        if (ok)
+          rms = reproj(rvec, tvec);
+        // IPPE degenerates when the marker faces the camera exactly (it
+        // returns R = I for a rotation of pi): re-solve with SQPNP and keep
+        // the better pose.
+        if (!ok || rms > 1.0) {
+          cv::Mat rv2, tv2;
+          if (cv::solvePnP(obj, img_solve, camMat, dist_solve, rv2, tv2, false,
+                           cv::SOLVEPNP_SQPNP)) {
+            double rms2 = reproj(rv2, tv2);
+            if (!ok || rms2 < rms) {
+              rvec = rv2;
+              tvec = tv2;
+              rms = rms2;
+              ok = true;
+            }
+          }
+        }
+        if (ok) {
+          if (centre != cv::Point3f(0.f, 0.f, 0.f)) {
+            cv::Mat R;
+            cv::Rodrigues(rvec, R);
+            tvec -= R * cv::Mat(cv::Vec3d(centre.x, centre.y, centre.z));
+          }
         }
       } catch (const cv::Exception &e) {
         cv_threw = true;
@@ -324,7 +375,8 @@ struct FractalDetectorImpl {
       t[k] = tvec.at<double>(k);
     }
     return nb::make_tuple(make_owned<double>(std::move(r), {(size_t)3}),
-                          make_owned<double>(std::move(t), {(size_t)3}), rms);
+                          make_owned<double>(std::move(t), {(size_t)3}), rms,
+                          have_inner ? "inner" : "corners");
   }
 
   // Draw detected marker outlines (+ id) and, when axes=true, the pose frame
@@ -436,8 +488,8 @@ NB_MODULE(_nanofractal, m) {
            nb::arg("images"), nb::arg("num_threads") = 0, nb::arg("rx") = -1,
            nb::arg("ry") = -1, nb::arg("rw") = -1, nb::arg("rh") = -1)
       .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
-           nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("corners"),
-           nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
+           nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("ids"),
+           nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
            nb::arg("fisheye") = false)
       .def("draw", &FractalDetectorImpl::draw, nb::arg("image"),
            nb::arg("corners"), nb::arg("ids"), nb::arg("axes"), nb::arg("cam"),

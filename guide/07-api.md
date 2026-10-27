@@ -18,7 +18,7 @@ FractalDetector(config, marker_size=-1.0, params=None)
 |---|---|
 | `detect(image, with_inner_points=False, roi=None)` | `DetectionResult` |
 | `detect_batch(images, num_threads=0, roi=None)` | `list[DetectionResult]` (no inner points) |
-| `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False)` | `(rvec, tvec, reproj_err)` or `None` |
+| `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False, return_method=False)` | `(rvec, tvec, reproj_err)` or `None` |
 | `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None, inplace=True)` | the image drawn on |
 
 - `image`: `uint8` C-contiguous `(H,W)`, `(H,W,1)` or `(H,W,3)` BGR.
@@ -27,7 +27,8 @@ FractalDetector(config, marker_size=-1.0, params=None)
 - `num_threads=0`: all cores.
 - `estimate_pose`: `camera_matrix` 3×3, `dist_coeffs` of length 4/5/8/12/14
   (exactly 4 with `fisheye=True`); uses inner points when the result has ≥ 4,
-  else the 4 outer corners.
+  else the outer corners of every detected level; `return_method=True` adds
+  `"inner"` or `"corners"` as a 4th element.
 - `draw` needs a writable contiguous image when `inplace=True`; `axis_length`
   defaults to half `marker_size`.
 

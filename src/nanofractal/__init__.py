@@ -264,15 +264,21 @@ class FractalDetector:
         camera_matrix: np.ndarray,
         dist_coeffs: np.ndarray,
         fisheye: bool = False,
+        return_method: bool = False,
     ):
         """Pose of the fractal marker as ``(rvec, tvec, reproj_err)`` or ``None``.
 
         Uses the inner+outer correspondences (``result.points_2d``/``points_3d``
         from ``detect(..., with_inner_points=True)``) when there are >= 4 points
-        -- accurate and occlusion-robust -- otherwise falls back to the 4 outer
-        corners with a square of side ``marker_size``. Returns ``None`` when no
-        marker is visible. ``rvec``/``tvec`` are float64 ``(3,)``; ``reproj_err``
-        is the RMS reprojection error in pixels (use it to gate noisy poses).
+        -- accurate and occlusion-robust -- otherwise the outer corners of every
+        detected level, each at its real position and size within the marker
+        (so the scale is right even when only an inner level is visible).
+        Returns ``None`` when no marker is visible. ``rvec``/``tvec`` are float64
+        ``(3,)``; ``reproj_err`` is the RMS reprojection error in pixels (use it
+        to gate noisy poses).
+
+        ``return_method=True`` appends the method used: ``"inner"`` or
+        ``"corners"``.
 
         ``fisheye=True`` treats (camera_matrix, dist_coeffs) as the OpenCV fisheye
         model (dist_coeffs must be exactly 4: k1,k2,k3,k4); points are undistorted
@@ -300,7 +306,11 @@ class FractalDetector:
             else np.zeros((0, 3), dtype=np.float32)
         )
         corners = np.ascontiguousarray(result.corners, dtype=np.float32)
-        return self._d.estimate_pose(p2d, p3d, corners, cam, dist, bool(fisheye))
+        ids = np.ascontiguousarray(result.ids, dtype=np.int32)
+        out = self._d.estimate_pose(p2d, p3d, ids, corners, cam, dist, bool(fisheye))
+        if out is None or return_method:
+            return out
+        return out[:3]
 
     def draw(
         self,

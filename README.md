@@ -128,7 +128,8 @@ for level_id, corners in res:
 
 `estimate_pose` returns `(rvec, tvec, reproj_err)` or `None`. It uses every
 visible inner **and** outer corner correspondence when available and falls back
-to the four outer corners otherwise; `reproj_err` (RMS px) lets you gate noisy
+to the outer corners of every detected level otherwise (each at its true size,
+so the scale is right even when only an inner level is visible); `reproj_err` (RMS px) lets you gate noisy
 poses.
 
 ```python

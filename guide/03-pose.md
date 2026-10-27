@@ -45,13 +45,27 @@ right and Y up as printed, Z pointing out of the marker towards the camera.
 
 | | `detect(image)` | `detect(image, with_inner_points=True)` |
 |---|---|---|
-| correspondences | 4 outer corners of the external marker | every matched inner and outer corner of all visible levels (often 50–200) |
+| correspondences | 4 outer corners of every detected level | every matched inner and outer corner of all visible levels (often 50–200) |
 | cost (1080p) | ~1 ms | ~2–2.5 ms |
 | pose | fine when the marker is large and fully visible | much more stable at distance, at steep angles and under occlusion |
 
-Without inner points `estimate_pose` falls back to the four outer corners of
-the first detected marker (with `SOLVEPNP_IPPE_SQUARE`). You never need to
-handle the "no inner points" case yourself.
+Without inner points `estimate_pose` uses the four outer corners of **every
+detected level**, each at its real position and size within the marker, so
+the distance is right even when only an inner level is visible (the camera is
+close and the external border is out of frame). You never need to handle the
+"no inner points" case yourself. To see which path was taken, pass
+`return_method=True`:
+
+```python
+close = np.ascontiguousarray(page[350:550, 350:550])     # only the inner levels
+Kc = np.array([[900.0, 0, 100], [0, 900.0, 100], [0, 0, 1]])
+rvec, tvec, err, method = det.estimate_pose(det.detect(close), Kc, D, return_method=True)
+print(method, tvec[2])   # "corners", the same distance as for the full page
+```
+
+If the solver's first answer reprojects worse than 1 px (OpenCV's IPPE
+degenerates when the marker faces the camera exactly), the pose is solved
+again with `SOLVEPNP_SQPNP` and the better one is returned.
 
 The correspondences are available if you prefer your own solver:
 

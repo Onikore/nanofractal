@@ -81,6 +81,7 @@ class FractalDetector:
         self,
         points_2d: Annotated[NDArray[numpy.float32], dict(order="C", device="cpu", writable=False)],
         points_3d: Annotated[NDArray[numpy.float32], dict(order="C", device="cpu", writable=False)],
+        ids: Annotated[NDArray[numpy.int32], dict(order="C", device="cpu", writable=False)],
         corners: Annotated[NDArray[numpy.float32], dict(order="C", device="cpu", writable=False)],
         camera_matrix: Annotated[
             NDArray[numpy.float64], dict(order="C", device="cpu", writable=False)

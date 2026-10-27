@@ -5,6 +5,23 @@ All notable changes to this project are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- `estimate_pose(..., return_method=True)` also returns the method used:
+  `"inner"` or `"corners"`.
+
+### Fixed
+- `estimate_pose` without inner points treated the first detected level as
+  the external marker: when only an inner level was visible, the distance was
+  wrong by the ratio of the level sizes (×7 for the innermost level of
+  `FRACTAL_3L_6`). It now uses the outer corners of every detected level at
+  their real coordinates from the marker configuration (R2).
+- `estimate_pose` on a marker facing the camera exactly: OpenCV's IPPE
+  returned a wrong rotation (reprojection error of hundreds of pixels). A
+  first solution worse than 1 px is now re-solved with `SOLVEPNP_SQPNP` and
+  the better one kept.
+
 ## [0.6.1] - 2026-10-27
 
 ### Added
