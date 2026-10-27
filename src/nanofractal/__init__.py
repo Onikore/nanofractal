@@ -184,6 +184,9 @@ class DetectionResult:
     # ..., with_inner_points=True); they stay None for plain detection.
     points_2d: np.ndarray | None = None  # float32 (M, 2)
     points_3d: np.ndarray | None = None  # float32 (M, 3)
+    # True when one marker level was seen in two separate places (two copies
+    # of the marker in view); only the largest copy of each level is returned.
+    multiple_instances: bool = False
 
     def __len__(self) -> int:
         return int(self.ids.shape[0])
@@ -243,15 +246,15 @@ class FractalDetector:
         if roi is not None:
             rx, ry, rw, rh = _validate_roi(roi, image)
             if with_inner_points:
-                ids, corners, p2d, p3d = self._d.detect_full(image, rx, ry, rw, rh)
-                return DetectionResult(ids=ids, corners=corners, points_2d=p2d, points_3d=p3d)
-            ids, corners = self._d.detect(image, rx, ry, rw, rh)
+                ids, corners, p2d, p3d, multi = self._d.detect_full(image, rx, ry, rw, rh)
+                return DetectionResult(ids, corners, p2d, p3d, multi)
+            ids, corners, multi = self._d.detect(image, rx, ry, rw, rh)
         else:
             if with_inner_points:
-                ids, corners, p2d, p3d = self._d.detect_full(image)
-                return DetectionResult(ids=ids, corners=corners, points_2d=p2d, points_3d=p3d)
-            ids, corners = self._d.detect(image)
-        return DetectionResult(ids=ids, corners=corners)
+                ids, corners, p2d, p3d, multi = self._d.detect_full(image)
+                return DetectionResult(ids, corners, p2d, p3d, multi)
+            ids, corners, multi = self._d.detect(image)
+        return DetectionResult(ids=ids, corners=corners, multiple_instances=multi)
 
     def detect_batch(
         self,
@@ -269,7 +272,7 @@ class FractalDetector:
             results = self._d.detect_batch(imgs, int(num_threads), rx, ry, rw, rh)
         else:
             results = self._d.detect_batch(imgs, int(num_threads))
-        return [DetectionResult(ids=i, corners=c) for i, c in results]
+        return [DetectionResult(ids=i, corners=c, multiple_instances=m) for i, c, m in results]
 
     def estimate_pose(
         self,

@@ -52,6 +52,23 @@ OpenCV's convention: the centre of pixel `(i, j)` is at `x = j, y = i`.
 `res.points_2d` / `res.points_3d` stay `None` unless you ask for inner corners
 (see [Pose](03-pose.md)).
 
+### Two copies of the same marker
+
+The detector reports each level once. If the same marker is visible twice
+(two printed copies, a reflection, a screen showing the marker), only the
+largest copy of each level is returned and `res.multiple_instances` is
+`True` — the levels may then come from different copies, so treat the pose as
+unreliable:
+
+```python
+twice = np.full((900, 1800), 255, np.uint8)
+twice[100:800, 100:800] = twice[100:800, 1000:1700] = nf.generate_fractal("FRACTAL_5L_6", 700)
+print(det.detect(twice).multiple_instances, det.detect(page).multiple_instances)   # True False
+```
+
+With `FractalTracker` or an ROI only the copies inside the searched region
+are seen.
+
 ## Regions of interest
 
 When you know where the marker can be, restrict the search. The ROI is a

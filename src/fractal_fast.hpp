@@ -908,6 +908,10 @@ public:
 
   const nanofractal::FractalMarkerSet &marker_set() const { return set_; }
 
+  // True when the last detection saw one marker level in two separate places
+  // (two copies of the marker); only the largest of each id is returned.
+  bool multiple_instances() const { return multiple_; }
+
 private:
   struct Code {
     int id;
@@ -937,6 +941,7 @@ private:
   void detect_gray(std::vector<Detection> &out) {
     out.clear();
     cands_.clear();
+    multiple_ = false;
     float scale = params.detection_scale;
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
@@ -1012,6 +1017,20 @@ private:
                 else
                   return false;
               });
+    // A smaller candidate of the same id whose centre lies outside the
+    // largest one is another copy of the marker (the same square seen twice,
+    // e.g. both borders of its black frame, is nested instead).
+    for (size_t i = 0, j; i < cands_.size() && !multiple_; i = j) {
+      for (j = i + 1; j < cands_.size() && cands_[j].id == cands_[i].id; j++) {
+        const cv::Point2f *c = cands_[j].c;
+        if (!inside(cands_[i].c, (c[0] + c[1] + c[2] + c[3]) * 0.25f)) {
+          multiple_ = true;
+          break;
+        }
+      }
+      while (j < cands_.size() && cands_[j].id == cands_[i].id)
+        j++;
+    }
     auto ip = std::unique(
         cands_.begin(), cands_.end(),
         [](const Candidate &a, const Candidate &b) { return a.id == b.id; });
@@ -1155,6 +1174,18 @@ private:
            fx * (1 - fy) * px(tl.y, tl.x + 1) +
            (1 - fx) * fy * px(tl.y + 1, tl.x) +
            fx * fy * px(tl.y + 1, tl.x + 1);
+  }
+
+  // Point inside a convex quad (either winding).
+  static bool inside(const cv::Point2f *q, cv::Point2f p) {
+    int pos = 0, neg = 0;
+    for (int k = 0; k < 4; k++) {
+      cv::Point2f e = q[(k + 1) % 4] - q[k], v = p - q[k];
+      float cr = e.x * v.y - e.y * v.x;
+      pos += cr > 0;
+      neg += cr < 0;
+    }
+    return pos == 0 || neg == 0;
   }
 
   static int perimeter(const cv::Point2f *a) {
@@ -1449,6 +1480,7 @@ private:
     bool consider;
   };
 
+  bool multiple_ = false;
   nanofractal::FractalMarkerSet set_;
   std::vector<Group> groups_;
   AdaptiveThreshold thresh_;

@@ -80,7 +80,7 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
                              std::vector<float> &&corners,
                              const std::vector<cv::Point2f> &p2d,
                              const std::vector<cv::Point3f> &p3d, float ox,
-                             float oy) {
+                             float oy, bool multiple) {
   size_t n = ids.size();
   size_t m2 = p2d.size();
   std::vector<float> pts2(m2 * 2), pts3(m2 * 3);
@@ -91,10 +91,10 @@ static nb::tuple full_result(std::vector<int32_t> &&ids,
     pts3[i * 3 + 1] = p3d[i].y;
     pts3[i * 3 + 2] = p3d[i].z;
   }
-  return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                        corners_to_numpy(std::move(corners), n),
-                        make_owned<float>(std::move(pts2), {m2, (size_t)2}),
-                        make_owned<float>(std::move(pts3), {m2, (size_t)3}));
+  return nb::make_tuple(
+      ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
+      make_owned<float>(std::move(pts2), {m2, (size_t)2}),
+      make_owned<float>(std::move(pts3), {m2, (size_t)3}), multiple);
 }
 
 struct FractalDetectorImpl {
@@ -145,7 +145,8 @@ struct FractalDetectorImpl {
          has_roi ? (float)ry : 0.f);
     size_t n = ids.size();
     return nb::make_tuple(ids_to_numpy(std::move(ids)),
-                          corners_to_numpy(std::move(corners), n));
+                          corners_to_numpy(std::move(corners), n),
+                          d.multiple_instances());
   }
 
   // detect + all visible (inner) corner correspondences for occlusion-robust
@@ -167,7 +168,8 @@ struct FractalDetectorImpl {
     std::vector<int32_t> ids;
     std::vector<float> corners;
     fill(markers, ids, corners, ox, oy);
-    return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy);
+    return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy,
+                       d.multiple_instances());
   }
 
   // Parallel batch detection. The detector is not thread-safe, so each worker
@@ -198,6 +200,7 @@ struct FractalDetectorImpl {
     float oy_ = has_roi ? (float)ry : 0.f;
     std::vector<std::vector<int32_t>> all_ids(N);
     std::vector<std::vector<float>> all_corners(N);
+    std::vector<char> all_multiple(N, 0);
     if (N > 0) {
       nb::gil_scoped_release rel;
       std::atomic<size_t> next{0};
@@ -207,6 +210,7 @@ struct FractalDetectorImpl {
         while ((i = next.fetch_add(1)) < N) {
           pool[t]->detect(mats[i], markers);
           fill(markers, all_ids[i], all_corners[i], ox_, oy_);
+          all_multiple[i] = pool[t]->multiple_instances();
         }
       };
       std::vector<std::thread> ths;
@@ -221,7 +225,8 @@ struct FractalDetectorImpl {
       size_t n = all_ids[i].size();
       out.push_back(
           nb::make_tuple(ids_to_numpy(std::move(all_ids[i])),
-                         corners_to_numpy(std::move(all_corners[i]), n)));
+                         corners_to_numpy(std::move(all_corners[i]), n),
+                         (bool)all_multiple[i]));
     }
     return out;
   }
@@ -601,7 +606,7 @@ NB_MODULE(_nanofractal, m) {
         std::vector<float> corners;
         fill(det, ids, corners);
         return full_result(std::move(ids), std::move(corners), p2d, p3d, 0.f,
-                           0.f);
+                           0.f, false);
       },
       nb::arg("config"), nb::arg("marker_size"), nb::arg("params"),
       nb::arg("image"), nb::arg("inner"));

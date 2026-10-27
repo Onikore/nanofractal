@@ -8,6 +8,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `DetectionResult.multiple_instances`: `True` when one marker level is seen
+  in two separate places (two copies of the marker in view); detection still
+  returns the largest copy of each level (R8a).
 - `PoseSmoother.update(..., t=seconds)`: real time steps and a
   constant-velocity model (no lag on steady motion, dropped frames handled);
   `reproj_err` / `n_points` scale the measurement noise; `gate` rejects
