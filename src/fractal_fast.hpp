@@ -34,6 +34,10 @@
 #include <opencv2/imgproc.hpp>
 #include <type_traits>
 #include <vector>
+#if (defined(__aarch64__) || defined(_M_ARM64)) && !defined(NF_NO_NEON)
+#define NF_NEON 1
+#include <arm_neon.h>
+#endif
 #if defined(__SSE2__) || defined(_M_X64)
 #include <immintrin.h>
 #endif
@@ -686,6 +690,28 @@ private:
       const uint64_t hi = block(x + 32);
       ev[x >> 6] = lo | (hi << 32);
     }
+#elif defined(NF_NEON)
+    // the same 64 pixels per word; NEON has no movemask, movemask64 below
+    const int8x16_t zero = vdupq_n_s8(0), one = vdupq_n_s8(1);
+    for (; x + 64 <= end; x += 64) {
+      uint8x16_t o[4], h[4], is[4];
+      for (int k = 0; k < 4; k++) {
+        const int8x16_t l = vld1q_s8(row + x + 16 * k - 1);
+        const int8x16_t p = vld1q_s8(row + x + 16 * k);
+        const uint8x16_t p1 = vceqq_s8(p, one);
+        o[k] = vandq_u8(vceqq_s8(l, zero), p1);
+        h[k] = vandq_u8(vceqq_s8(p, zero), vcgtq_s8(l, zero));
+        is[k] = skip_isolated ? vandq_u8(p1, vceqq_u8(vld1q_u8(nb + x + 16 * k),
+                                                      vdupq_n_u8(0)))
+                              : vdupq_n_u8(0);
+      }
+      uint64_t mo = movemask64(o), mh = movemask64(h);
+      const uint64_t iso = movemask64(is);
+      mo &= ~iso;
+      mh &= ~((iso << 1) | iso_carry);
+      iso_carry = (uint32_t)(iso >> 63);
+      ev[x >> 6] = mo | mh;
+    }
 #endif
     // scalar tail (and the whole row without AVX2), word by word
     for (; x < end; x += 64) {
@@ -704,6 +730,20 @@ private:
       ev[x >> 6] = word;
     }
   }
+
+#if defined(NF_NEON)
+  // Bit i of the result = top bit of byte i of m[i / 16] (0x00 / 0xff bytes).
+  static inline uint64_t movemask64(const uint8x16_t *m) {
+    static const uint8_t w[16] = {1, 2, 4, 8, 16, 32, 64, 128,
+                                  1, 2, 4, 8, 16, 32, 64, 128};
+    const uint8x16_t bit = vld1q_u8(w);
+    const uint8x16_t s1 = vpaddq_u8(vandq_u8(m[0], bit), vandq_u8(m[1], bit));
+    const uint8x16_t s2 = vpaddq_u8(vandq_u8(m[2], bit), vandq_u8(m[3], bit));
+    uint8x16_t s = vpaddq_u8(s1, s2);
+    s = vpaddq_u8(s, s);
+    return vgetq_lane_u64(vreinterpretq_u64_u8(s), 0);
+  }
+#endif
 
   static inline int ctz64(uint64_t v) {
 #if defined(_MSC_VER) && !defined(__clang__)

@@ -1,0 +1,49 @@
+name: bench-arm
+
+# Manual aarch64 check: full tests, then single-core detect timings of the
+# NEON build against the same code built with -DNF_NO_NEON (scalar paths).
+# A proxy for Raspberry Pi numbers (RPI_TEST_PLAN, section B): same ISA,
+# different core.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-24.04-arm
+    env:
+      OPENCV_VERSION: "4.10.0"
+      OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv-arm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache static OpenCV
+        uses: actions/cache@v4
+        with:
+          path: .opencv-arm
+          key: opencv-arm-${{ hashFiles('ci/build-opencv.sh') }}
+      - name: Build static OpenCV
+        run: bash ci/build-opencv.sh
+      - name: Build (NEON) and test
+        env:
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/.opencv-arm
+        run: |
+          pip install ".[test]"
+          python -m pytest tests -q --ignore tests/test_benchmarks.py
+      - name: Time the NEON build
+        run: |
+          cd benchmarks
+          python fractal_bench.py run --threads 1 --modes detect --min-time 3 --json ../neon.json
+      - name: Build without NEON and compare (x < 1 = scalar slower)
+        env:
+          CMAKE_PREFIX_PATH: ${{ github.workspace }}/.opencv-arm
+          CMAKE_ARGS: -DCMAKE_CXX_FLAGS=-DNF_NO_NEON
+        run: |
+          pip install . --force-reinstall --no-deps
+          cd benchmarks
+          python fractal_bench.py run --threads 1 --modes detect --min-time 3 --vs ../neon.json
