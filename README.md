@@ -56,6 +56,9 @@ Levers:
 
 - **`nf.set_num_threads(n)`** — threads used inside one `detect()` call
   (default: all cores; `1` = sequential, best for many concurrent detectors).
+  Next to video capture/encoding, fewer threads are often faster (Raspberry
+  Pi 5 with a 60 fps camera and preview: 2 threads 57.5 frames/s, 4 threads
+  32.5) — start with half the cores and measure the whole pipeline.
 - **`params.detection_scale`** — runs the threshold/contour stage on a
   downscaled frame (corners are still refined at full resolution); `0.5` is
   roughly 3–4× faster at 4K.

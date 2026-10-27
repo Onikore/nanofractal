@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `n_inliers` and `reproj_err_rel` (error / side of the largest detected
   level in px) (R2, R14).
 
+### Documentation
+- Threads under load: next to capture/encoding fewer `detect()` threads can
+  be faster (Raspberry Pi 5 numbers) — `guide/05`, README (R15).
+
 ### Performance
 - `detection_scale` with a factor other than 0.5 / 0.25 (e.g. 0.75, 0.6,
   0.35) was slower than no scaling: OpenCV's generic `INTER_AREA` path cost

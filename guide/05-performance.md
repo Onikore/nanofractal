@@ -74,10 +74,27 @@ det = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.20, params=p)
 |---|---:|---:|---:|---:|---:|
 | ms | 3.2 | 1.8 | 1.4 | 1.1 | 1.1–1.4 |
 
-Gains stop around the number of **physical** cores. On a machine shared with
-other heavy work, setting it to the physical-core count (or fewer) keeps
-latency steady. `detect_batch` is not affected: it always runs one frame per
-worker and never splits frames.
+Gains stop around the number of **physical** cores. `detect_batch` is not
+affected: it always runs one frame per worker and never splits frames.
+
+### Under load: fewer threads can be faster
+
+The table above is an idle machine. When the same process (or the system)
+also captures, encodes or previews video, `detect()`'s threads compete with
+that work, and the extra synchronisation can cost more than it gains. A
+Raspberry Pi 5 report (camera capture at 60 fps + preview, 4 cores):
+
+| `set_num_threads` | 2 | 4 |
+|---|---:|---:|
+| frames/s processed | 57.5 | 32.5 |
+
+Start with **half the cores**, then measure the whole pipeline (capture →
+detect → pose), not `detect()` alone:
+
+```python
+import os
+nf.set_num_threads(max(1, (os.cpu_count() or 2) // 2))
+```
 
 ## Cheap things that matter
 
