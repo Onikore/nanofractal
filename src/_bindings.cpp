@@ -492,9 +492,10 @@ struct FractalDetectorImpl {
           // The other planar solution: IPPE returns both, ordered by error;
           // keep the one that is not (close to) the chosen rotation.
           std::vector<cv::Mat> rvs, tvs;
-          const int meth = F_o.size() == 4 && !have_inner
-                               ? cv::SOLVEPNP_IPPE_SQUARE
-                               : cv::SOLVEPNP_IPPE;
+          // (an enum, not int: older OpenCV 4 takes only SolvePnPMethod)
+          const cv::SolvePnPMethod meth = F_o.size() == 4 && !have_inner
+                                              ? cv::SOLVEPNP_IPPE_SQUARE
+                                              : cv::SOLVEPNP_IPPE;
           cv::solvePnPGeneric(F_o, F_is, camMat, dist_solve, rvs, tvs, false,
                               meth);
           cv::Mat R0;
