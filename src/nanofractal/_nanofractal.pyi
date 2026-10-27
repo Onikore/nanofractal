@@ -115,6 +115,7 @@ class FractalDetector:
             NDArray[numpy.float64], dict(order="C", device="cpu", writable=False)
         ],
         fisheye: bool = False,
+        full: bool = False,
     ) -> object: ...
     def draw(
         self,

@@ -174,6 +174,13 @@ class Pose(NamedTuple):
     n_points: int  # correspondences used before outlier rejection
     n_inliers: int  # correspondences kept
     reproj_err_rel: float  # reproj_err / side (px) of the largest detected level
+    # 6x6 covariance of (rvec, tvec) from the inliers: sigma^2 (J^T J)^-1, or
+    # None with too few points (4 corners leave 2 degrees of freedom)
+    cov: np.ndarray | None = None
+    # the other planar (IPPE) solution and its RMS error; None if there is none
+    rvec_alt: np.ndarray | None = None
+    tvec_alt: np.ndarray | None = None
+    reproj_err_alt: float | None = None
 
 
 @dataclass(repr=False)
@@ -484,14 +491,15 @@ class FractalDetector:
         )
         corners = np.ascontiguousarray(result.corners, dtype=np.float32)
         ids = np.ascontiguousarray(result.ids, dtype=np.int32)
-        out = self._d.estimate_pose(p2d, p3d, ids, corners, cam, dist, bool(fisheye))
+        out = self._d.estimate_pose(p2d, p3d, ids, corners, cam, dist, bool(fisheye), bool(full))
         if out is None:
             return None
         if not full:
             return out[:3]
-        rvec, tvec, err, method, n_points, n_inliers = out
+        rvec, tvec, err, method, n_points, n_inliers, cov, ra, ta, ea = out
         side = float(np.linalg.norm(corners - np.roll(corners, 1, axis=1), axis=2).mean(1).max())
-        return Pose(rvec, tvec, err, method, n_points, n_inliers, err / side if side > 0 else 0.0)
+        rel = err / side if side > 0 else 0.0
+        return Pose(rvec, tvec, err, method, n_points, n_inliers, rel, cov, ra, ta, ea)
 
     def draw(
         self,

@@ -30,7 +30,7 @@ FractalDetector(config, marker_size=-1.0, params=None)
   (exactly 4 with `fisheye=True`); uses inner points when the result has ≥ 4,
   else the outer corners of every detected level; one outlier pass with ≥ 8
   points; `full=True` returns `Pose(rvec, tvec, reproj_err, method, n_points,
-  n_inliers, reproj_err_rel)`.
+  n_inliers, reproj_err_rel, cov, rvec_alt, tvec_alt, reproj_err_alt)`.
 - `draw` needs a writable contiguous image when `inplace=True`; `axis_length`
   defaults to half `marker_size`.
 

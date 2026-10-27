@@ -19,6 +19,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   markers), so `ids` and inner points can grow (R16).
 
 ### Added
+- `Pose` (`estimate_pose(..., full=True)`) gains `cov`, the 6×6 covariance
+  of `(rvec, tvec)` from the inlier residuals (matches Monte Carlo scatter
+  within ±12 %, pinhole and fisheye), and the other planar solution
+  `rvec_alt`, `tvec_alt`, `reproj_err_alt` to judge flip ambiguity. Only
+  computed with `full=True` (~60 µs); the plain call is unchanged (R20).
 - `detect(..., all_instances=True)`: every copy of the marker in view, its
   levels grouped by geometry (the largest level of a copy predicts its
   smaller ones); `DetectionResult.instances` / `points_instance`,

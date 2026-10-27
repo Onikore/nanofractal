@@ -83,6 +83,8 @@ print(p.method, p.tvec[2])   # "corners", the same distance as for the full page
 | `method` | `"inner"` (inner + outer points) or `"corners"` (level corners only) |
 | `n_points`, `n_inliers` | correspondences before / after the outlier pass |
 | `reproj_err_rel` | `reproj_err` divided by the side in pixels of the largest detected level |
+| `cov` | 6×6 covariance of `(rvec, tvec)` (rad, metres), or `None` with fewer than 4 points |
+| `rvec_alt`, `tvec_alt`, `reproj_err_alt` | the other planar solution and its RMS error, or `None` |
 
 `reproj_err_rel` is the better quality gate when the marker's size in the
 frame varies a lot (landing, approach): 1 px is a bad pose for a marker 40 px
@@ -92,6 +94,24 @@ wide but excellent for one 800 px wide.
 p = det.estimate_pose(res, K, D, full=True)
 if p is not None and p.reproj_err_rel < 0.005 and p.n_inliers >= 8:
     rvec, tvec = p.rvec, p.tvec
+```
+
+### How sure is the pose?
+
+`cov` is the first-order covariance of `(rvec, tvec)` from the inlier
+residuals, `σ² (JᵀJ)⁻¹` — e.g. `np.sqrt(p.cov[5, 5])` is the 1-σ uncertainty
+of the distance. On synthetic noise it matches the actual scatter of the pose
+within ±12 %. It describes the chosen solution only.
+
+A planar target has a second, mirrored pose that fits small or nearly frontal
+markers almost as well (the "flip"). `rvec_alt` / `tvec_alt` is that other
+solution; `reproj_err_alt / reproj_err` says how distinct they are: above ~5
+the choice is safe, near 1 the two are indistinguishable from the image alone
+and an outside cue (gravity from an IMU, the previous frame) has to decide.
+
+```python
+if p is not None and p.rvec_alt is not None:
+    print("distance ±", np.sqrt(p.cov[5, 5]), "flip ratio", p.reproj_err_alt / p.reproj_err)
 ```
 
 The correspondences are available if you prefer your own solver:

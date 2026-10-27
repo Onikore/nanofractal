@@ -306,7 +306,8 @@ struct FractalDetectorImpl {
   // returns (rvec(3,), tvec(3,), inlier rms px, method, n_points,
   // n_inliers), or None when no marker.
   nb::object estimate_pose(F32Arr p2d, F32Arr p3d, I32Arr ids, F32Arr corners,
-                           F64Arr cam, F64Arr dist, bool fisheye = false) {
+                           F64Arr cam, F64Arr dist, bool fisheye = false,
+                           bool full = false) {
     if (cam.ndim() != 2 || cam.shape(0) != 3 || cam.shape(1) != 3)
       throw nb::value_error("camera_matrix must be float64 (3,3)");
     if (dist.ndim() != 1)
@@ -374,6 +375,12 @@ struct FractalDetectorImpl {
     cv::Mat rvec, tvec;
     double rms = 0;
     bool ok = false;
+    // R20: the final (inlier) correspondences, the covariance of
+    // (rvec, tvec) and the other IPPE solution
+    std::vector<cv::Point3f> F_o;
+    std::vector<cv::Point2f> F_i;
+    cv::Mat cov, alt_r, alt_t;
+    double alt_err = -1;
     size_t n_inliers = obj.size();
     bool cv_threw = false;
     std::string cv_err;
@@ -440,6 +447,9 @@ struct FractalDetectorImpl {
           return good;
         };
         ok = solve(obj, img, img_solve, solver, rvec, tvec, rms);
+        F_o = obj;
+        F_i = img;
+        std::vector<cv::Point2f> F_is = img_solve;
         // One outlier pass: drop points off by more than max(1.5 px,
         // 3 x median) and solve again when enough of them remain.
         if (ok && obj.size() >= 8) {
@@ -466,14 +476,77 @@ struct FractalDetectorImpl {
               tvec = tv2;
               rms = e2;
               n_inliers = o2.size();
+              F_o = o2;
+              F_i = im2;
+              F_is = ims2;
             }
           }
         }
-        if (ok) {
+        if (ok && !full) {
           if (centre != cv::Point3f(0.f, 0.f, 0.f)) {
             cv::Mat R;
             cv::Rodrigues(rvec, R);
             tvec -= R * cv::Mat(cv::Vec3d(centre.x, centre.y, centre.z));
+          }
+        } else if (ok) {
+          // The other planar solution: IPPE returns both, ordered by error;
+          // keep the one that is not (close to) the chosen rotation.
+          std::vector<cv::Mat> rvs, tvs;
+          const int meth = F_o.size() == 4 && !have_inner
+                               ? cv::SOLVEPNP_IPPE_SQUARE
+                               : cv::SOLVEPNP_IPPE;
+          cv::solvePnPGeneric(F_o, F_is, camMat, dist_solve, rvs, tvs, false,
+                              meth);
+          cv::Mat R0;
+          cv::Rodrigues(rvec, R0);
+          double best = 1e-3; // rad: closer is the same solution
+          for (size_t i = 0; i < rvs.size(); i++) {
+            cv::Mat Ri;
+            cv::Rodrigues(rvs[i], Ri);
+            cv::Mat dr;
+            cv::Rodrigues(R0.t() * Ri, dr);
+            const double ang = cv::norm(dr);
+            if (ang > best) {
+              best = ang;
+              alt_r = rvs[i].clone();
+              alt_t = tvs[i].clone();
+            }
+          }
+          if (!alt_r.empty())
+            alt_err = residuals(F_o, F_i, alt_r, alt_t, nullptr);
+          if (centre != cv::Point3f(0.f, 0.f, 0.f)) {
+            const cv::Mat c(cv::Vec3d(centre.x, centre.y, centre.z));
+            tvec -= R0 * c;
+            if (!alt_r.empty()) {
+              cv::Mat Ra;
+              cv::Rodrigues(alt_r, Ra);
+              alt_t -= Ra * c;
+            }
+            for (auto &q : F_o)
+              q += centre;
+          }
+          // Covariance of (rvec, tvec): sigma^2 (J^T J)^-1, J the image
+          // Jacobian at the inliers, sigma^2 from their residuals.
+          const int n = (int)F_o.size();
+          if (2 * n > 6) {
+            std::vector<cv::Point2f> proj;
+            cv::Mat J, Jp;
+            if (fisheye) {
+              cv::fisheye::projectPoints(cv::Mat(F_o).reshape(3, n), proj, rvec,
+                                         tvec, camMat, distMat, 0, J);
+              cv::hconcat(J.colRange(8, 11), J.colRange(11, 14), Jp);
+            } else {
+              cv::projectPoints(F_o, rvec, tvec, camMat, distMat, proj, J);
+              Jp = J.colRange(0, 6);
+            }
+            double se = 0;
+            for (int i = 0; i < n; i++) {
+              const double dx = proj[i].x - F_i[i].x, dy = proj[i].y - F_i[i].y;
+              se += dx * dx + dy * dy;
+            }
+            cv::Mat JtJ = Jp.t() * Jp, inv;
+            cv::invert(JtJ, inv, cv::DECOMP_SVD);
+            cov = inv * (se / (2 * n - 6));
           }
         }
       } catch (const cv::Exception &e) {
@@ -486,15 +559,29 @@ struct FractalDetectorImpl {
       throw nb::value_error(("pose estimation failed: " + cv_err).c_str());
     if (!ok)
       return nb::none();
-    std::vector<double> r(3), t(3);
-    for (int k = 0; k < 3; k++) {
-      r[k] = rvec.at<double>(k);
-      t[k] = tvec.at<double>(k);
+    auto vec3 = [](const cv::Mat &m) {
+      std::vector<double> v(3);
+      for (int k = 0; k < 3; k++)
+        v[k] = m.at<double>(k);
+      return nb::cast(make_owned<double>(std::move(v), {(size_t)3}));
+    };
+    nb::object cov_o = nb::none(), ar = nb::none(), at = nb::none(),
+               ae = nb::none();
+    if (!cov.empty()) {
+      std::vector<double> c(36);
+      for (int i = 0; i < 36; i++)
+        c[i] = cov.at<double>(i / 6, i % 6);
+      cov_o =
+          nb::cast(make_owned<double>(std::move(c), {(size_t)6, (size_t)6}));
     }
-    return nb::make_tuple(make_owned<double>(std::move(r), {(size_t)3}),
-                          make_owned<double>(std::move(t), {(size_t)3}), rms,
+    if (!alt_r.empty()) {
+      ar = vec3(alt_r);
+      at = vec3(alt_t);
+      ae = nb::cast(alt_err);
+    }
+    return nb::make_tuple(vec3(rvec), vec3(tvec), rms,
                           have_inner ? "inner" : "corners", (int)obj.size(),
-                          (int)n_inliers);
+                          (int)n_inliers, cov_o, ar, at, ae);
   }
 
   // Draw detected marker outlines (+ id) and, when axes=true, the pose frame
@@ -611,7 +698,7 @@ NB_MODULE(_nanofractal, m) {
       .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
            nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("ids"),
            nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),
-           nb::arg("fisheye") = false)
+           nb::arg("fisheye") = false, nb::arg("full") = false)
       .def("draw", &FractalDetectorImpl::draw, nb::arg("image"),
            nb::arg("corners"), nb::arg("ids"), nb::arg("axes"), nb::arg("cam"),
            nb::arg("dist"), nb::arg("rvec"), nb::arg("tvec"),
