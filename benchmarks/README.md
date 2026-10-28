@@ -90,6 +90,19 @@ python benchmarks/frames_report.py frames/ --config FRACTAL_3L_6 --size 0.18 --c
 
 ---
 
+## pi_threads.py — thread scaling per frame size
+
+`detect` median / min time at 1–4 threads for frame sizes from 640×480 to
+1920×1080 and the speedup over one thread. Tells a cache limit (scaling
+breaks at one frame size for every thread count) from a busy core (only the
+all-cores run suffers, with a large median / min spread).
+
+```
+python benchmarks/pi_threads.py --json pi_threads.json
+```
+
+---
+
 ## Real-image slot (`benchmarks/real_images/`)
 
 Drop your own fractal-marker captures into `benchmarks/real_images/` with a
