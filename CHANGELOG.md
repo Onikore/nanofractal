@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.1] - 2026-10-28
+
 ### Added
 - Markers seen from very close: when a frame yields nothing, it is
   thresholded again shrunk to ~320 px wide with a block of a fifth of that
@@ -23,8 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Documentation
 - Raspberry Pi 5 measurements: NEON is 1.5–2× faster than the scalar build
   on one core; thread scaling is limited by memory from about 960×720 up
-  (`guide/05` table). `benchmarks/pi_threads.py` and
-  `benchmarks/frames_report.py` for runs on the target board.
+  (`guide/05` table); `benchmarks/pi_threads.py` measures it on the board.
 
 ## [0.7.0] - 2026-10-28
 
@@ -290,7 +291,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GIL released during detection for multi-core batch scaling.
 - Portable `manylinux` wheels with a minimal static OpenCV linked in.
 
-[Unreleased]: https://github.com/Onikore/nanofractal/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/Onikore/nanofractal/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/Onikore/nanofractal/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Onikore/nanofractal/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/Onikore/nanofractal/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/Onikore/nanofractal/compare/v0.5.0...v0.6.0
