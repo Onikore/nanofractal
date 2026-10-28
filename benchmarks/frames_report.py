@@ -69,11 +69,34 @@ def main():
     if not files:
         raise SystemExit(f"no images in {args.folder}")
     cols = [
-        "file", "ids", "inconsistent_ids", "multiple_instances", "n_instances",
-        "detect_ms", "contours", "not_quad", "accepted", "duplicate", "border",
-        "bits", "inconsistent", "miss_border", "miss_bits", "miss_contrast",
-        "miss_side_px", "method", "n_points", "reproj_err", "reproj_err_alt",
-        "tx", "ty", "tz", "sd_tx", "sd_ty", "sd_tz", "sd_rot_deg",
+        "file",
+        "ids",
+        "inconsistent_ids",
+        "multiple_instances",
+        "n_instances",
+        "detect_ms",
+        "contours",
+        "not_quad",
+        "accepted",
+        "duplicate",
+        "border",
+        "bits",
+        "inconsistent",
+        "miss_border",
+        "miss_bits",
+        "miss_contrast",
+        "miss_side_px",
+        "method",
+        "n_points",
+        "reproj_err",
+        "reproj_err_alt",
+        "tx",
+        "ty",
+        "tz",
+        "sd_tx",
+        "sd_ty",
+        "sd_tz",
+        "sd_rot_deg",
     ]
     det.detect(np.zeros((64, 64), np.uint8))  # warm-up: first call allocates
     n_any = n_outer = n_drop = n_multi = 0
@@ -94,10 +117,16 @@ def main():
             for q in diag.quads:
                 counts[q.reason] += 1
             row = [
-                p.name, " ".join(map(str, res.ids.tolist())),
+                p.name,
+                " ".join(map(str, res.ids.tolist())),
                 " ".join(map(str, res.inconsistent_ids.tolist())),
-                int(res.multiple_instances), allr.n_instances, round(ms, 2),
-                diag.n_contours, diag.n_not_quad, *counts.values(), *_near_miss(diag),
+                int(res.multiple_instances),
+                allr.n_instances,
+                round(ms, 2),
+                diag.n_contours,
+                diag.n_not_quad,
+                *counts.values(),
+                *_near_miss(diag),
             ]
             pose_cols = [""] * 11
             if K is not None and len(res):
@@ -110,8 +139,12 @@ def main():
                         sd = [*np.round(d[3:], 5), round(rot, 3)]
                     alt = "" if pose.reproj_err_alt is None else round(pose.reproj_err_alt, 3)
                     pose_cols = [
-                        pose.method, pose.n_points, round(pose.reproj_err, 3), alt,
-                        *np.round(pose.tvec, 4), *sd,
+                        pose.method,
+                        pose.n_points,
+                        round(pose.reproj_err, 3),
+                        alt,
+                        *np.round(pose.tvec, 4),
+                        *sd,
                     ]
             w.writerow(row + pose_cols)
             n_any += len(res) > 0
