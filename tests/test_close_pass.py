@@ -1,6 +1,5 @@
 """Second threshold pass for markers seen from very close (R21)."""
 
-import cv2
 import numpy as np
 import pytest
 
@@ -9,25 +8,27 @@ import nanofractal as nf
 CONFIG = "FRACTAL_3L_6"
 
 
+def _blur(img, sigma):
+    """Separable Gaussian blur (numpy only)."""
+    r = int(3 * sigma + 1)
+    k = np.exp(-0.5 * (np.arange(-r, r + 1) / sigma) ** 2)
+    k /= k.sum()
+    p = np.pad(img, r, mode="edge")
+    p = sum(k[i] * p[:, i : i + img.shape[1]] for i in range(2 * r + 1))
+    return sum(k[i] * p[i : i + img.shape[0], :] for i in range(2 * r + 1))
+
+
 def _close_dark(seed, size=2200):
-    """A dark, low-contrast 1280x720 frame cut from a marker ``size`` px wide:
+    """A dark, low-contrast 1280x720 crop of a marker ``size`` px wide:
     cells of ~160 px, far larger than the automatic threshold block."""
     rng = np.random.default_rng(seed)
     black, white = rng.uniform(4, 10), rng.uniform(22, 40)
-    m = nf.generate_fractal(CONFIG, size).astype(np.float32) / 255.0
-    img = black + (white - black) * m
-    c = size / 2
-    dx, dy = rng.uniform(-150, 150), rng.uniform(-100, 100)
-    src = np.float32(
-        [[c - 640 + dx, c - 360 + dy], [c + 640 + dx, c - 360 + dy],
-         [c + 640 + dx, c + 360 + dy], [c - 640 + dx, c + 360 + dy]]
-    )  # fmt: skip
-    t = rng.uniform(0, 0.08) * 1280
-    dst = np.float32([[t, 0], [1280 - t, 0], [1280, 720], [0, 720]])
-    out = cv2.warpPerspective(img, cv2.getPerspectiveTransform(src, dst), (1280, 720))
-    out = cv2.GaussianBlur(out, (0, 0), rng.uniform(0.6, 1.5))
-    out = out + rng.normal(0, rng.uniform(2, 4), out.shape)
-    return np.clip(out, 0, 255).astype(np.uint8)
+    m = nf.generate_fractal(CONFIG, size).astype(np.float64) / 255.0
+    x0 = int(size / 2 - 640 + rng.uniform(-150, 150))
+    y0 = int(size / 2 - 360 + rng.uniform(-100, 100))
+    img = black + (white - black) * m[y0 : y0 + 720, x0 : x0 + 1280]
+    img = _blur(img, rng.uniform(0.6, 1.5)) + rng.normal(0, rng.uniform(2, 4), img.shape)
+    return np.ascontiguousarray(np.clip(img, 0, 255).astype(np.uint8))
 
 
 FRAMES = [_close_dark(s) for s in range(8)]
@@ -68,11 +69,12 @@ def test_frames_with_a_marker_are_unchanged():
 @pytest.mark.parametrize("seed", range(5))
 def test_no_detection_on_clutter(seed):
     rng = np.random.default_rng(100 + seed)
-    img = cv2.GaussianBlur(rng.integers(0, 256, (720, 1280), dtype=np.uint8), (0, 0), 3)
-    for _ in range(30):  # dark rectangles and lines
+    img = _blur(rng.uniform(0, 255, (720, 1280)), 3.0)
+    for _ in range(30):  # dark rectangles
         x, y = rng.integers(0, 1200), rng.integers(0, 650)
         w, h = rng.integers(20, 300), rng.integers(20, 300)
-        cv2.rectangle(img, (int(x), int(y)), (int(x + w), int(y + h)), int(rng.integers(0, 80)), -1)
+        img[y : y + h, x : x + w] = rng.uniform(0, 80)
+    img = np.ascontiguousarray(np.clip(img, 0, 255).astype(np.uint8))
     assert len(nf.FractalDetector(CONFIG).detect(img)) == 0
 
 
