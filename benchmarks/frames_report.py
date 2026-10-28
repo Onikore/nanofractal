@@ -106,7 +106,8 @@ def main():
                     sd = [""] * 4
                     if pose.cov is not None:
                         d = np.sqrt(np.diag(pose.cov))
-                        sd = [*np.round(d[3:], 5), round(float(np.degrees(np.linalg.norm(d[:3]))), 3)]
+                        rot = float(np.degrees(np.linalg.norm(d[:3])))
+                        sd = [*np.round(d[3:], 5), round(rot, 3)]
                     alt = "" if pose.reproj_err_alt is None else round(pose.reproj_err_alt, 3)
                     pose_cols = [
                         pose.method, pose.n_points, round(pose.reproj_err, 3), alt,
