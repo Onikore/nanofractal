@@ -22,6 +22,7 @@ class DetectorParams:
     subpix_win_size: int
     kfilter_min_dist: float
     detection_scale: float
+    close_pass: bool
 
     def __init__(self) -> None: ...
     def __repr__(self) -> str: ...
@@ -77,6 +78,7 @@ class Diagnosis:
     n_contours: int
     n_not_quad: int
     quads: list[QuadInfo]
+    second_pass: bool = ...
 
     def __repr__(self) -> str: ...
 

@@ -276,6 +276,9 @@ class Diagnosis:
     n_contours: int  # contours traced (at least min_contour_size long)
     n_not_quad: int  # of those, not a convex quadrilateral
     quads: list[QuadInfo]
+    # found by the second pass (params.close_pass); the quads are then those
+    # of that pass, on the shrunken frame (corners in image coordinates)
+    second_pass: bool = False
 
     def __repr__(self) -> str:
         counts: dict[str, int] = {}
@@ -386,7 +389,8 @@ class FractalDetector:
             out = self._d.diagnose(image, rx, ry, rw, rh)
         else:
             out = self._d.diagnose(image)
-        ids, corners, multi, drop, n_cont, n_nq, qc, cells, reason, border, bits, near, con = out
+        ids, corners, multi, drop, n_cont, n_nq, qc = out[:7]
+        cells, reason, border, bits, near, con, second = out[7:]
         quads = [
             QuadInfo(
                 qc[i],
@@ -406,6 +410,7 @@ class FractalDetector:
             int(n_cont),
             int(n_nq),
             quads,
+            bool(second),
         )
 
     def detect_batch(

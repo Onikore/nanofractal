@@ -72,6 +72,14 @@ class DetectorParams:
 
     @detection_scale.setter
     def detection_scale(self, arg: float, /) -> None: ...
+    @property
+    def close_pass(self) -> bool:
+        """
+        when nothing is found, threshold again on a ~320 px wide copy with a large block (markers seen from very close; default True)
+        """
+
+    @close_pass.setter
+    def close_pass(self, arg: bool, /) -> None: ...
     def __repr__(self) -> str: ...
 
 class FractalDetector:

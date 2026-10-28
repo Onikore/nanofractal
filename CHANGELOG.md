@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Markers seen from very close: when a frame yields nothing, it is
+  thresholded again shrunk to ~320 px wide with a block of a fifth of that
+  width (`DetectorParams.close_pass`, on by default). The automatic block
+  (11 px at 1280 wide) is far smaller than cells of 60 px and more, and on a
+  dark frame their contours fall apart: real frames at 0.12 m (report from
+  autolanding-pi) gave 0/20; synthetic dark close frames 0/60 → 60/60.
+  Frames where the first pass finds a level are bit-identical to 0.7.0; no
+  false detection on 300 frames of marker-like objects; a frame without a
+  marker costs 0.25–0.5 ms more on one core, 0.1–0.15 ms on all cores
+  (x86, 720p–1080p). `Diagnosis.second_pass` tells such detections apart
+  (R21).
+
 ### Documentation
 - Raspberry Pi 5 measurements: NEON is 1.5–2× faster than the scalar build
   on one core; thread scaling is limited by memory from about 960×720 up

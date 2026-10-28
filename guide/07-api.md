@@ -78,6 +78,7 @@ wide; only when the detector's own `detection_scale` is 1.
 | `n_contours` | contours traced (at least `min_contour_size` long) |
 | `n_not_quad` | of those, not a convex quadrilateral |
 | `quads` | `list[QuadInfo]` |
+| `second_pass` | `True` when the detection came from the second pass (`params.close_pass`); `quads` are then those of that pass |
 
 `QuadInfo(corners, reason, cells, nearest_id, border_errors, bit_errors,
 contrast)`: corners float32 `(4, 2)` before sub-pixel refinement; `reason`
@@ -90,7 +91,7 @@ from `nearest_id`; `contrast` mean bright minus mean dark cell (grey levels).
 
 Fields `min_contour_size`, `adaptive_block_size`, `adaptive_c`,
 `approx_poly_rate`, `subpix_win_size`, `kfilter_min_dist`,
-`detection_scale` — see [Tuning](06-tuning.md).
+`detection_scale`, `close_pass` — see [Tuning](06-tuning.md).
 
 ## Functions
 

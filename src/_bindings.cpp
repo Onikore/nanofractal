@@ -177,10 +177,19 @@ struct FractalDetectorImpl {
     std::vector<Detection> markers;
     std::vector<FastFractalDetector::QuadInfo> quads;
     int n_contours = 0, n_not_quad = 0;
+    bool second = false;
     FastFractalDetector &d = detector(0);
     {
       nb::gil_scoped_release rel;
       d.detect(work, markers);
+      second = d.second_pass();
+      if (second && markers.empty()) {
+        // the second pass found nothing either: report the first pass's
+        // quads, they say more about a marker that is not read
+        d.close_pass_enabled_ = false;
+        d.detect(work, markers);
+        d.close_pass_enabled_ = true;
+      }
       d.diagnose(quads, n_contours, n_not_quad);
     }
     const float ox = has_roi ? (float)rx : 0.f, oy = has_roi ? (float)ry : 0.f;
@@ -209,7 +218,8 @@ struct FractalDetectorImpl {
         corners_to_numpy(std::move(qc), K), ids_to_numpy(std::move(cells)),
         ids_to_numpy(std::move(reason)), ids_to_numpy(std::move(border)),
         ids_to_numpy(std::move(bits)), ids_to_numpy(std::move(nearest)),
-        make_owned<float>(std::move(contrast), {K}));
+        make_owned<float>(std::move(contrast), {K}),
+        second && !markers.empty());
   }
 
   // detect + all visible (inner) corner correspondences for occlusion-robust
@@ -668,6 +678,10 @@ NB_MODULE(_nanofractal, m) {
       .def_rw("detection_scale", &DetectorParams::detection_scale,
               "downscale factor for the detection stage "
               "(1.0 = full res; 0.5 ~= 4x faster; corners refined at full res)")
+      .def_rw("close_pass", &DetectorParams::close_pass,
+              "when nothing is found, threshold again on a ~320 px wide copy "
+              "with a large block (markers seen from very close; default "
+              "True)")
       .def("__repr__", [](const DetectorParams &p) {
         return "DetectorParams(min_contour_size=" +
                std::to_string(p.min_contour_size) + ", adaptive_block_size=" +
@@ -676,7 +690,8 @@ NB_MODULE(_nanofractal, m) {
                ", approx_poly_rate=" + std::to_string(p.approx_poly_rate) +
                ", subpix_win_size=" + std::to_string(p.subpix_win_size) +
                ", kfilter_min_dist=" + std::to_string(p.kfilter_min_dist) +
-               ", detection_scale=" + std::to_string(p.detection_scale) + ")";
+               ", detection_scale=" + std::to_string(p.detection_scale) +
+               ", close_pass=" + (p.close_pass ? "True" : "False") + ")";
       });
 
   // ---- Fractal ----

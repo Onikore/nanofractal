@@ -23,6 +23,7 @@ Invalid values raise `ValueError` when `detect()` is called.
 | `min_contour_size` | `-1` (120 px of perimeter) | shorter contours are ignored | rarely: the detection limit for small markers comes from reading their cells, not from this |
 | `approx_poly_rate` | `0.05` | polygon-fit tolerance as a fraction of the contour length | strong lens distortion bends marker edges: try `0.07` |
 | `subpix_win_size` | `-1` (4 → 9×9 window) | corner sub-pixel refinement half-window; `0` disables it | small markers (< ~60 px): `2`–`3`; very blurry frames: `5`–`6` |
+| `close_pass` | `True` | when a frame yields nothing, threshold it again shrunk to ~320 px wide with a block of a fifth of that width: finds markers seen from very close (cells far larger than the automatic block), above all on dark frames. Frames where the first pass finds a level are untouched | `False` only to save the extra 0.1–0.5 ms on frames without a marker |
 | `kfilter_min_dist` | `10.0` | minimum distance between inner-corner keypoints (inner-point path only) | dense small markers: lower to 5–7 |
 
 Notes:

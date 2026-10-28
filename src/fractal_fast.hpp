@@ -1292,17 +1292,47 @@ private:
     return params.subpix_win_size == -1 ? 4 : params.subpix_win_size;
   }
 
+  // Second pass (params.close_pass): frame width after shrinking, and the
+  // threshold block as a fraction of it. Measured on dark close-range frames
+  // (cells 100-230 px at 1280x720): 0/60 found by the first pass, 58-60/60
+  // by a second one at 320 px with a block of 45-63; no false detection on
+  // 150 frames of marker-like objects.
+  static constexpr int kClosePassWidth = 320;
+  static constexpr int kClosePassBlockDiv = 5;
+
   void detect_gray(std::vector<Detection> &out) {
     out.clear();
-    cands_.clear();
-    multiple_ = false;
     dropped_.clear();
     float scale = params.detection_scale;
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
+    run_pass(out, scale, 0, false);
+    second_pass_ = false;
+    if (!out.empty() || !params.close_pass || !close_pass_enabled_)
+      return;
+    const float s2 =
+        std::min(1.f, float(kClosePassWidth) / float(std::max(1, gray_.cols)));
+    const int w2 = std::min(
+        255, std::max(3, int(gray_.cols * s2 + 0.5f) / kClosePassBlockDiv));
+    if (std::min(gray_.cols, gray_.rows) * s2 < 3 * 8)
+      return; // too small to hold a marker
+    second_pass_ = true;
+    run_pass(out, s2, w2, true);
+  }
+
+  // One detection pass on the frame scaled by `scale`, threshold block `win`
+  // (0 = params.adaptive_block_size, automatic when -1). own_resize: always
+  // our area resize -- cv::resize's 0.25 path is 2-3x slower at 1280x720 and
+  // the second pass need not match the reference.
+  void run_pass(std::vector<Detection> &out, float scale, int win,
+                bool own_resize) {
+    out.clear();
+    cands_.clear();
+    multiple_ = false;
+    dropped_.clear();
     scale_ = scale;
     const float inv_scale = 1.f / scale;
-    if (scale == 0.5f || scale == 0.25f) // integer factors: OpenCV's fast path
+    if (!own_resize && (scale == 0.5f || scale == 0.25f)) // OpenCV's path
       cv::resize(gray_, proc_, cv::Size(), scale, scale, cv::INTER_AREA);
     else if (scale < 1.f) {
       area_.max_threads = serial ? 1 : 0;
@@ -1310,13 +1340,14 @@ private:
     } else
       proc_ = gray_;
 
-    int win;
-    if (params.adaptive_block_size == -1) {
-      win = std::max(int(3), int(15 * float(proc_.cols) / 1920.));
-    } else {
-      win = params.adaptive_block_size;
-      if (win < 3)
-        win = 3;
+    if (win <= 0) {
+      if (params.adaptive_block_size == -1) {
+        win = std::max(int(3), int(15 * float(proc_.cols) / 1920.));
+      } else {
+        win = params.adaptive_block_size;
+        if (win < 3)
+          win = 3;
+      }
     }
     if (win % 2 == 0)
       win++;
@@ -2249,6 +2280,14 @@ private:
 
   bool multiple_ = false;
   float scale_ = 1.f;
+  bool second_pass_ = false; // the last detect() needed the second pass
+
+public:
+  // diagnose() turns the second pass off to re-run the first one
+  bool close_pass_enabled_ = true;
+  bool second_pass() const { return second_pass_; }
+
+private:
   std::vector<int> dropped_;      // levels removed by check_levels()
   std::vector<int> plevel_;       // level of each inner point
   std::vector<int> inst_, pinst_; // copy of each level / inner point

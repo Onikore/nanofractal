@@ -39,4 +39,11 @@ struct DetectorParams {
     // of the dominant stage (~4x faster). Values <=0 or >=1 mean no scaling.
     // min_contour_size stays expressed in original-image pixels.
     float detection_scale     = 1.f;
+
+    // When nothing is found, threshold again on a frame shrunk to ~320 px wide
+    // with a block of a fifth of that width. The automatic block is much
+    // smaller than the cells of a marker seen from very close, and on a dark,
+    // low-contrast frame its contours fall apart; the second pass finds such
+    // markers and costs nothing on frames where the first pass finds one.
+    bool  close_pass          = true;
 };
