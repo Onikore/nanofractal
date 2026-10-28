@@ -51,8 +51,8 @@ With OpenCV 5.0 (whose own `findContours` is already ~3× faster than 4.10's)
 1080p `detect` 4.66 → 0.92 ms and 4K 15.9 → 4.14 ms.
 
 0.7 adds a SIMD prefix-scan threshold (`detect` on one core ×1.17–1.34 at
-4K, ×1.05–1.12 at 1080p) and NEON code for aarch64 (GitHub's ARM runner, one
-core: 1.5–1.9× faster than the scalar build). The second bit reading costs
+4K, ×1.05–1.12 at 1080p) and NEON code for aarch64 (Raspberry Pi 5, one
+core: 1.5–2× faster than the scalar build). The second bit reading costs
 nothing measurable on scenes the reference already reads.
 
 Reproduce on your machine:

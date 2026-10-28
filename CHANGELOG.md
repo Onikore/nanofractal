@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- Raspberry Pi 5 measurements: NEON is 1.5–2× faster than the scalar build
+  on one core; thread scaling is limited by memory from about 960×720 up
+  (`guide/05` table). `benchmarks/pi_threads.py` and
+  `benchmarks/frames_report.py` for runs on the target board.
+
 ## [0.7.0] - 2026-10-28
 
 ### Added

@@ -89,16 +89,22 @@ Raspberry Pi 5 report (camera capture at 60 fps + preview, 4 cores):
 |---|---:|---:|
 | frames/s processed | 57.5 | 32.5 |
 
-Even without the camera, a Pi 5 does not gain from four threads at 720p
-and above (0.7.0, `clutter` scene, ms per frame):
+On a small board memory, not the cores, limits larger frames. Raspberry
+Pi 5 (0.7.0, idle, `clutter` scene, ms per `detect`):
 
-| frame | 1 thread | 2 threads | 4 threads | 1 thread, `detection_scale=0.5` |
+| frame | 1 thread | 2 threads | 3 threads | 4 threads |
 |---|---:|---:|---:|---:|
-| 640×480 | 0.67 | 0.36 | 0.48 | 0.25 |
-| 1280×720 | 2.51 | 2.35 | 4.41 | 0.72 |
-| 1456×1088 | 5.49 | 4.63 | 6.20 | 1.39 |
+| 640×480 | 0.67 | 0.36 | 0.26 | 0.21 |
+| 960×720 | 1.59 | 0.94 | 0.84 | 0.90 |
+| 1280×720 | 2.41 | 1.65 | 1.52 | 1.66 |
+| 1456×1088 | 4.70 | 3.65 | 3.56 | 3.84 |
+| 1920×1080 | 6.73 | 5.35 | 5.00 | 5.58 |
 
-On such boards `detection_scale` is the bigger lever.
+From about 960×720 up a third and fourth thread add little, and with other
+work on the board (here: a package update in the background) four threads
+were slower than one. `detection_scale=0.5` cuts 1280×720 to 0.72 ms on one
+thread — on such boards it is the bigger lever. Measure your board with
+`python benchmarks/pi_threads.py`.
 
 Start with **half the cores**, then measure the whole pipeline (capture →
 detect → pose), not `detect()` alone:
