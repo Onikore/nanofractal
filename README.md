@@ -12,6 +12,10 @@ correspondences for accurate pose.
 **multi-threaded** single-frame detection, and a **parallel batch** API.
 
 Since 0.6 the library is fractal-only (the ArUco detector was removed).
+0.7 reads far markers the reference detector misses (2.6–3 px per cell),
+explains rejected candidates (`diagnose`), drops levels that do not fit the
+rest, finds every copy of a marker, reports pose uncertainty, scales the
+tracker to the marker size and adds NEON code for aarch64.
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most
@@ -23,9 +27,10 @@ in it is executed by the test-suite.
 ## Performance
 
 The hot path (adaptive threshold, contour tracing, polygon fitting, decoding)
-is a purpose-built reimplementation that returns **bit-identical outer
-corners** to the reference detector (checked by the test-suite against
-`_reference_detect`), and runs on all cores *within* a single frame.
+is a purpose-built reimplementation: every level the reference detector
+finds comes back with **bit-identical corners** (checked by the test-suite
+against `_reference_detect`), and it runs on all cores *within* a single
+frame.
 
 Median latency per frame, `FRACTAL_5L_6`, synthetic scenes from
 `nanofractal.bench`, i5-12400 (6 cores / 12 threads), `NF_MARCH=x86-64-v3`,
@@ -44,6 +49,11 @@ Median latency per frame, `FRACTAL_5L_6`, synthetic scenes from
 With OpenCV 5.0 (whose own `findContours` is already ~3× faster than 4.10's)
 0.6 is 2–2.5× faster than 0.5 on one core and 3–8.5× with all cores, e.g.
 1080p `detect` 4.66 → 0.92 ms and 4K 15.9 → 4.14 ms.
+
+0.7 adds a SIMD prefix-scan threshold (`detect` on one core ×1.17–1.34 at
+4K, ×1.05–1.12 at 1080p) and NEON code for aarch64 (GitHub's ARM runner, one
+core: 1.5–1.9× faster than the scalar build). The second bit reading costs
+nothing measurable on scenes the reference already reads.
 
 Reproduce on your machine:
 
@@ -64,7 +74,9 @@ Levers:
   roughly 3–4× faster at 4K.
 - **`FractalTracker`** — for video: searches near the previous frame's
   markers (whole frame when they are lost), with identical accuracy; ~2×
-  faster at 4K and 1.4–1.8× at 1080p on a moving-marker sequence.
+  faster at 4K and 1.4–1.8× at 1080p on a moving-marker sequence. With
+  `auto_scale=True` it also shrinks the searched region to the marker size
+  (corners still refined on the full frame): 4K, one core, ×5.7 vs `detect`.
 - **`detect_batch`** — parallelises across frames for offline throughput.
 
 ---
@@ -144,8 +156,14 @@ if pose is not None:
     det.draw(image, res, camera_matrix, dist_coeffs, rvec, tvec)   # outlines + axes
 ```
 
-The raw correspondences are exposed too: `res.points_2d` float32 `(M, 2)` and
-`res.points_3d` float32 `(M, 3)` (planar, z = 0).
+The raw correspondences are exposed too: `res.points_2d` float32 `(M, 2)`,
+`res.points_3d` float32 `(M, 3)` (planar, z = 0) and `res.points_level`, the
+level of each point.
+
+`estimate_pose(..., full=True)` returns a `Pose` with the method used, the
+number of points and inliers, the 6×6 covariance `cov` of `(rvec, tvec)` and
+the other planar solution (`rvec_alt`, `tvec_alt`, `reproj_err_alt`): when
+`reproj_err_alt` is close to `reproj_err` the tilt is ambiguous.
 
 ### Tune detection
 
@@ -165,7 +183,7 @@ det.params.adaptive_c = 5.0  # changes apply to the next detect()
 ### Video
 
 ```python
-tracker = nf.FractalTracker(det)          # margin=0.25, pad=16
+tracker = nf.FractalTracker(det, auto_scale=True)   # margin=0.25, pad=16
 for frame in frames:
     res = tracker.detect(frame)           # same results as det.detect(frame)
 ```
@@ -175,6 +193,13 @@ for frame in frames:
 - `detect(image, roi=(x, y, w, h))` — detect in a zero-copy sub-rectangle;
   corners come back in full-image coordinates.
 - `detect_batch(images, num_threads=0, roi=None)` — parallel over frames.
+- `detect(image, all_instances=True)` — every copy of the marker in view;
+  `res.instance(k)` is copy `k`, ready for `estimate_pose`.
+- `res.inconsistent_ids` — levels dropped because they do not fit the
+  larger levels (a marker-like pattern elsewhere in the frame).
+- `diagnose(image)` — every candidate quad with the reason it was kept or
+  dropped (`"duplicate"`, `"border"`, `"bits"`, `"inconsistent"`), its
+  closest code and cell contrast: why a marker is not found.
 - `refine_corners(image, corners, win_size=5)` — standalone `cornerSubPix`.
 - `PoseSmoother(process_noise, measurement_noise, mode="kalman"|"ema")` —
   temporal pose smoothing.
@@ -190,7 +215,8 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
 - **Fused adaptive threshold.** Separable box sums (horizontal first, uint16,
   ring buffer + running vertical window), reproducing OpenCV's fixed-point /
   float rounding of the mean exactly, written straight into a zero-bordered
-  buffer together with 8-neighbour occupancy masks. Row stripes run in parallel.
+  buffer together with 8-neighbour occupancy masks. Horizontal sums come from
+  a SIMD prefix scan (AVX2 / NEON). Row stripes run in parallel.
 - **Contour tracing.** Suzuki–Abe border following identical to
   `cv::findContours(RETR_LIST, CHAIN_APPROX_NONE)` (sequential), with SIMD
   start detection, one mask load per step and no allocation for contours below
@@ -204,7 +230,9 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
   0.31 vs 0.72 ms).
 - **Polygon fit + decoding** in parallel per contour, with exact replicas of
   OpenCV 4's and OpenCV 5's `approxPolyDP` (they differ) and no per-frame heap
-  traffic.
+  traffic. A quad the reference reader rejects is read again with each cell
+  sampled exactly at its centre (the reference sampler is up to a pixel off,
+  a whole cell for far markers).
 - **Inner points.** FAST runs only around the marker; keypoint filtering and
   matching use grids instead of O(n²) scans.
 - **Tracking** (`FractalTracker`): region-of-interest search around the
@@ -214,9 +242,12 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
   error from 0.39 to 1.3 px.
 - **Zero-copy input, GIL released**, a detector pool for `detect_batch`.
 
-The one intentional behaviour difference from the reference detector: with
-`with_inner_points=True`, the FAST response threshold is computed over the
-marker's neighbourhood instead of the whole frame. Outer corners are unchanged.
+Intentional differences from the reference detector: the second bit reading
+finds more levels (far, blurred, steeply tilted markers) — levels the
+reference finds are unchanged; levels that do not fit the larger levels are
+dropped (`inconsistent_ids`); with `with_inner_points=True`, the FAST response
+threshold is computed over the marker's neighbourhood instead of the whole
+frame.
 
 ---
 

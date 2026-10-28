@@ -75,6 +75,21 @@ python benchmarks/reading.py --json results.json
 
 ---
 
+## frames_report.py — a folder of real frames to CSV
+
+One row per image: levels found, `inconsistent_ids`, copies of the marker,
+`detect` time, quad counts per `diagnose` reason and the closest rejected
+quad (wrong border cells, wrong bits, contrast, side); with `--calib`
+(npz with `K`, `dist`) also the pose, its standard deviations from
+`Pose.cov` and the error of the other planar solution. Used by
+`RPI_TEST_PLAN.md`.
+
+```
+python benchmarks/frames_report.py frames/ --config FRACTAL_3L_6 --size 0.18 --calib calib.npz --csv report.csv
+```
+
+---
+
 ## Real-image slot (`benchmarks/real_images/`)
 
 Drop your own fractal-marker captures into `benchmarks/real_images/` with a

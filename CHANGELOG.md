@@ -7,16 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Changed
-- Far markers: a quad the reference bit reader rejects gets a second
-  reading — each cell sampled exactly at its centre (the reference sampler
-  is up to a pixel off, a whole cell at 2–4 px per cell), on corners refined
-  to sub-pixel when the first try fails. Synthetic far frames, outer level of
-  `FRACTAL_4L_6`: found at 2.6 px/cell 0 → 80 %, 3.0 px/cell 0 → 100 %,
-  3.5 px/cell 27 → 100 %; no detection on 300 frames of marker-like
-  negatives; speed unchanged. Levels the reference finds keep exactly their
-  corners; more inner levels are found (e.g. blur σ=2, 45–60° tilt, small
-  markers), so `ids` and inner points can grow (R16).
+## [0.7.0] - 2026-10-28
 
 ### Added
 - `Pose` (`estimate_pose(..., full=True)`) gains `cov`, the 6×6 covariance
@@ -90,6 +81,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exactly at 0.75 / 0.6 and within one grey level otherwise) (R3).
 
 ### Changed
+- Far markers: a quad the reference bit reader rejects gets a second
+  reading — each cell sampled exactly at its centre (the reference sampler
+  is up to a pixel off, a whole cell at 2–4 px per cell), on corners refined
+  to sub-pixel when the first try fails. Synthetic far frames, outer level of
+  `FRACTAL_4L_6`: found at 2.6 px/cell 0 → 80 %, 3.0 px/cell 0 → 100 %,
+  3.5 px/cell 27 → 100 %; no detection on 300 frames of marker-like
+  negatives; speed unchanged. Levels the reference finds keep exactly their
+  corners; more inner levels are found (e.g. blur σ=2, 45–60° tilt, small
+  markers), so `ids` and inner points can grow (R16).
 - `estimate_pose` with 8 or more correspondences drops points off by more
   than `max(1.5 px, 3 × median)` once and solves again (if ≥ 8 points and
   ≥ 60 % remain); `reproj_err` is then the RMS over the kept points (R14).
@@ -271,6 +271,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GIL released during detection for multi-core batch scaling.
 - Portable `manylinux` wheels with a minimal static OpenCV linked in.
 
+[Unreleased]: https://github.com/Onikore/nanofractal/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/Onikore/nanofractal/compare/v0.6.1...v0.7.0
+[0.6.1]: https://github.com/Onikore/nanofractal/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/Onikore/nanofractal/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/Onikore/nanofractal/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/Onikore/nanofractal/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/Onikore/nanofractal/compare/v0.2.0...v0.3.0
