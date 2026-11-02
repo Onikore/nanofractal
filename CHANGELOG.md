@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.2] - 2026-11-02
+
 ### Added
 - `detect(..., prior=last_result)` and `FractalTracker(..., use_prior=True)`:
   a quad no reading decodes, lying where a level of the last detection was
@@ -307,7 +309,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - GIL released during detection for multi-core batch scaling.
 - Portable `manylinux` wheels with a minimal static OpenCV linked in.
 
-[Unreleased]: https://github.com/Onikore/nanofractal/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/Onikore/nanofractal/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/Onikore/nanofractal/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/Onikore/nanofractal/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/Onikore/nanofractal/compare/v0.6.1...v0.7.0
 [0.6.1]: https://github.com/Onikore/nanofractal/compare/v0.6.0...v0.6.1
