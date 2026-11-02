@@ -25,6 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   final corners, cells read wrong (> 0 only through a prior) — to weigh a
   detection instead of a yes/no. `detect` speed unchanged (R22).
 
+### Documentation
+- `guide/04`: keeping a marker at the edge of range (`use_prior`, reading
+  quality); `guide/07`: the new fields and arguments. ROADMAP: what a landing
+  flight video showed (most losses are frames with no whole level in view)
+  and which requests are not taken yet, with the reasons.
+
 ## [0.7.1] - 2026-10-28
 
 ### Added
@@ -92,6 +98,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   level in px) (R2, R14).
 
 ### Tooling / CI
+- `benchmarks/frames_report.py`: a folder of real frames to CSV (levels,
+  dropped levels, copies, the closest rejected quad, pose with covariance),
+  used by `RPI_TEST_PLAN.md`.
 - aarch64 wheels build on GitHub's native arm64 runner instead of QEMU and run
   the full test-suite for every Python version.
 - New CI job: static OpenCV 5.0 build with the AVX2 code paths (R11a).
