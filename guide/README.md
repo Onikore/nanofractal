@@ -14,11 +14,11 @@ frame and 4 ms per 4K frame** on a 6-core desktop CPU.
 | [1. Markers](01-markers.md) | choosing a configuration, generating and printing markers, detection range |
 | [2. Detection](02-detection.md) | inputs, results, levels and corner order, regions of interest |
 | [3. Pose](03-pose.md) | camera calibration, 6-DoF pose, inner corners, fisheye, drawing, smoothing |
-| [4. Video and cameras](04-video.md) | `FractalTracker`, a camera loop, several cameras |
+| [4. Video and cameras](04-video.md) | `FractalTracker`, `auto_scale`, keeping a flickering marker (`use_prior`), a camera loop, several cameras |
 | [5. Performance](05-performance.md) | **how to use it most efficiently** — decision table and measured numbers |
 | [6. Tuning parameters](06-tuning.md) | every `DetectorParams` field and when to change it |
 | [7. API reference](07-api.md) | all public classes and functions |
-| [8. Troubleshooting](08-troubleshooting.md) | marker not detected, noisy pose, common errors |
+| [8. Troubleshooting](08-troubleshooting.md) | marker not detected or lost, why a candidate was dropped, noisy pose, common errors |
 
 ## Install
 

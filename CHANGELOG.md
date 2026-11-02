@@ -30,6 +30,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   quality); `guide/07`: the new fields and arguments. ROADMAP: what a landing
   flight video showed (most losses are frames with no whole level in view)
   and which requests are not taken yet, with the reasons.
+- Documentation brought up to date: README (0.7.1/0.7.2 features, the
+  close pass among the differences from the reference), `guide/01` range
+  re-measured (reliable from 3–3.5 px per cell, 40–50 px of side; at least
+  one whole level must be in the frame), `guide/02` reading quality,
+  `guide/05` decision table (`use_prior`, `close_pass`), `guide/07`
+  (`prior`, `detect_batch` without quality fields, `Diagnosis.second_pass`),
+  `guide/08` (marker cut by the frame edge, flicker, weighing a pose),
+  `PUBLISHING.md`, `RPI_TEST_PLAN.md` (0.7.2, close range, 3–8 m).
+- `benchmarks/frames_report.py`: reading-quality columns and `--prior` to
+  read a folder of frames as a video.
 
 ## [0.7.1] - 2026-10-28
 

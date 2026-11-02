@@ -81,7 +81,9 @@ One row per image: levels found, `inconsistent_ids`, copies of the marker,
 `detect` time, quad counts per `diagnose` reason and the closest rejected
 quad (wrong border cells, wrong bits, contrast, side); with `--calib`
 (npz with `K`, `dist`) also the pose, its standard deviations from
-`Pose.cov` and the error of the other planar solution. Used by
+`Pose.cov` and the error of the other planar solution; the reading quality
+(`cell_px`, `contrast`, `bit_errors`) of the largest level. `--prior` reads
+the folder as a video, passing the last result as `prior`. Used by
 `RPI_TEST_PLAN.md`.
 
 ```

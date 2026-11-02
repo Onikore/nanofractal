@@ -15,7 +15,10 @@ Since 0.6 the library is fractal-only (the ArUco detector was removed).
 0.7 reads far markers the reference detector misses (2.6–3 px per cell),
 explains rejected candidates (`diagnose`), drops levels that do not fit the
 rest, finds every copy of a marker, reports pose uncertainty, scales the
-tracker to the marker size and adds NEON code for aarch64.
+tracker to the marker size and adds NEON code for aarch64. 0.7.1 finds
+markers seen from very close on dark frames (a second threshold pass);
+0.7.2 reports the reading quality of every level and keeps a marker that
+flickers at the edge of range (`prior` / `FractalTracker(use_prior=True)`).
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most
@@ -176,6 +179,7 @@ p.adaptive_c = 7.0           # threshold constant
 p.approx_poly_rate = 0.05    # polygon fit epsilon = perimeter * rate
 p.subpix_win_size = 4        # corner refinement half-window (0 = off)
 p.kfilter_min_dist = 10.0    # min distance between inner-corner keypoints
+p.close_pass = True          # retry empty frames with a large threshold block (very close markers)
 det = nf.FractalDetector("FRACTAL_5L_6", params=p)
 det.params.adaptive_c = 5.0  # changes apply to the next detect()
 ```
@@ -183,9 +187,10 @@ det.params.adaptive_c = 5.0  # changes apply to the next detect()
 ### Video
 
 ```python
-tracker = nf.FractalTracker(det, auto_scale=True)   # margin=0.25, pad=16
+tracker = nf.FractalTracker(det, auto_scale=True, use_prior=True)   # margin=0.25, pad=16
 for frame in frames:
-    res = tracker.detect(frame)           # same results as det.detect(frame)
+    res = tracker.detect(frame)           # det.detect(frame), plus levels read through the last result
+    print(res.cell_px, res.contrast, res.bit_errors)   # reading quality per level
 ```
 
 ### More
@@ -197,6 +202,11 @@ for frame in frames:
   `res.instance(k)` is copy `k`, ready for `estimate_pose`.
 - `res.inconsistent_ids` — levels dropped because they do not fit the
   larger levels (a marker-like pattern elsewhere in the frame).
+- `detect(image, prior=last_result)` — a level the plain reading misses by a
+  few cells where it was a moment ago is kept and marked by `bit_errors > 0`
+  (outer levels only; flight video: 10 more frames of 203).
+- `res.cell_px`, `res.contrast`, `res.bit_errors` — reading quality of every
+  level, to weigh a detection instead of a yes/no.
 - `diagnose(image)` — every candidate quad with the reason it was kept or
   dropped (`"duplicate"`, `"border"`, `"bits"`, `"inconsistent"`), its
   closest code and cell contrast: why a marker is not found.
@@ -244,10 +254,12 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
 
 Intentional differences from the reference detector: the second bit reading
 finds more levels (far, blurred, steeply tilted markers) — levels the
-reference finds are unchanged; levels that do not fit the larger levels are
-dropped (`inconsistent_ids`); with `with_inner_points=True`, the FAST response
-threshold is computed over the marker's neighbourhood instead of the whole
-frame.
+reference finds are unchanged; a frame where nothing is found is thresholded
+again with a large block (`close_pass`, markers seen from very close); levels
+that do not fit the larger levels are dropped (`inconsistent_ids`); with
+`with_inner_points=True`, the FAST response threshold is computed over the
+marker's neighbourhood instead of the whole frame. Reading with a `prior` is
+off unless asked for.
 
 ---
 

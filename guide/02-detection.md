@@ -52,6 +52,15 @@ OpenCV's convention: the centre of pixel `(i, j)` is at `x = j, y = i`.
 `res.points_2d` / `res.points_3d` stay `None` unless you ask for inner corners
 (see [Pose](03-pose.md)).
 
+How well each level was read — to weigh a detection rather than trust a
+yes/no:
+
+```python
+print(res.cell_px)              # float32 (N,) pixels per cell (~3 is the limit)
+print(res.contrast)             # float32 (N,) bright minus dark cells, grey levels
+print(res.bit_errors)           # int32 (N,)   cells read wrong: 0 unless read through `prior`
+```
+
 ### Two copies of the same marker
 
 The detector reports each level once. If the same marker is visible twice

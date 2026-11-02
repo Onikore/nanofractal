@@ -17,14 +17,17 @@ FractalDetector(config, marker_size=-1.0, params=None)
 | method | returns |
 |---|---|
 | `detect(image, with_inner_points=False, roi=None, all_instances=False, prior=None)` | `DetectionResult`; with `all_instances=True` every copy of the marker, see `instances`; `prior` = the last detection, see [Video](04-video.md#keeping-a-marker-at-the-edge-of-range-use_prior) |
-| `diagnose(image, roi=None)` | `Diagnosis(result, n_contours, n_not_quad, quads)` — see [Troubleshooting](08-troubleshooting.md#why-a-candidate-was-dropped) |
-| `detect_batch(images, num_threads=0, roi=None)` | `list[DetectionResult]` (no inner points) |
+| `diagnose(image, roi=None)` | `Diagnosis(result, n_contours, n_not_quad, quads, second_pass)` — see [Troubleshooting](08-troubleshooting.md#why-a-candidate-was-dropped) |
+| `detect_batch(images, num_threads=0, roi=None)` | `list[DetectionResult]` (no inner points, no `prior`; `cell_px` / `contrast` / `bit_errors` are `None`) |
 | `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False, full=False)` | `(rvec, tvec, reproj_err)`, a `Pose` with `full=True`, or `None` |
 | `draw(image, result, camera_matrix=None, dist_coeffs=None, rvec=None, tvec=None, axis_length=None, inplace=True)` | the image drawn on |
 
 - `image`: `uint8` C-contiguous `(H,W)`, `(H,W,1)` or `(H,W,3)` BGR.
 - `roi`: `(x, y, width, height)` inside the image; results are in full-image
   coordinates.
+- `prior`: a `DetectionResult` of this marker from a moment ago (full-image
+  coordinates); quads where its levels were are read with a few wrong cells
+  allowed (grids of 10+ cells). Used for this call only.
 - `num_threads=0`: all cores.
 - `estimate_pose`: `camera_matrix` 3×3, `dist_coeffs` of length 4/5/8/12/14
   (exactly 4 with `fisheye=True`); uses inner points when the result has ≥ 4,
@@ -44,7 +47,9 @@ FractalTracker(detector, margin=0.25, pad=16, auto_scale=False, scale_target_px=
 
 `auto_scale=True` shrinks the searched region (`detection_scale`, 1 down to
 0.35) so the largest level of the previous frame is about `scale_target_px`
-wide; only when the detector's own `detection_scale` is 1.
+wide; only when the detector's own `detection_scale` is 1. `use_prior=True`
+passes the last non-empty result (at most `prior_max_age` frames old) as
+`prior` to `detect`.
 
 | member | |
 |---|---|

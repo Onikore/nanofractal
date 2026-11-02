@@ -14,11 +14,17 @@ A configuration fixes how many levels are nested and their bit patterns:
 Id 0 is always the external (largest) marker; higher ids are nested further
 inside. Pick by the **range of distances** you need:
 
-- the external marker is detected while it is at least ~50–60 px wide in the
-  image (measured: 44 px for `2L`, 48 px for `5L`, 60 px for `4L` on a clean
-  print);
+- the external marker is found reliably from about **3–3.5 px per cell**,
+  i.e. 40–50 px of side in the image (synthetic frames with blur and noise,
+  share of frames at 3.0 px/cell: `2L` 77 %, `3L` 97 %, `4L` 100 %, `5L`
+  90 %; at 3.5 px/cell 97–100 %), and often down to 2.6 px/cell (20–75 %).
+  At the edge of range, `FractalTracker(use_prior=True)` keeps a marker that
+  was read a moment ago ([Video](04-video.md));
 - the innermost level keeps the marker detectable when the camera is so close
-  that only the centre of the marker is in view.
+  that only the centre of the marker is in view. At least one level has to be
+  **whole** in the frame: if the camera looks past the centre at touchdown
+  and every level is cut by the frame edge, no square detector finds it —
+  mount the camera, or place the marker, so the centre stays in view.
 
 More levels → a wider distance range at the same detection cost, so
 `FRACTAL_5L_6` is the default choice; the smaller configurations matter

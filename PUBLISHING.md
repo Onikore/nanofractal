@@ -21,8 +21,8 @@ workflow `release.yml`, environment `pypi`. It must be attached to the
 ```bash
 # bump version in pyproject.toml and add a CHANGELOG entry, commit, then:
 git push origin main
-git tag v0.6.0
-git push origin v0.6.0     # triggers the release workflow -> PyPI
+git tag -a vX.Y.Z -m "nanofractal X.Y.Z"
+git push origin vX.Y.Z     # triggers the release workflow -> PyPI
 ```
 
 Each release needs a **new version** — PyPI rejects re-uploading an existing one.

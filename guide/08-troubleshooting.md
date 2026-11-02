@@ -18,7 +18,14 @@ Work through these in order:
 6. **Distortion.** Wide-angle lenses bend the edges; detect on the raw frame
    and try `approx_poly_rate = 0.07` (or undistort first).
 7. **Blur.** Motion blur breaks the cell pattern; shorten the exposure.
-8. **Very close?** Cells of 60 px and more are far larger than the automatic
+8. **Cut by the frame edge?** At least one level must be whole in the
+   frame. Close to the marker, if the camera looks past its centre, every
+   level can be cut — then nothing is found (on a landing video this was 59
+   of the 62 frames without a detection).
+9. **Flickers at the edge of range?** Read in one frame, not in the next:
+   `FractalTracker(detector, use_prior=True)` or `detect(frame,
+   prior=last)` keeps it; those levels report `bit_errors > 0`.
+10. **Very close?** Cells of 60 px and more are far larger than the automatic
    threshold block (11 px at 1280 wide); on a dark frame the contours then
    fall apart. `params.close_pass` (on by default) retries such frames on a
    shrunken copy; if it is off, or the frame is huge, set
@@ -71,7 +78,11 @@ listed; `n_not_quad` counts the ones that are not a convex quad.
 ## The pose jumps or is wrong
 
 - Check `reproj_err`: above ~2 px the correspondences or the intrinsics are
-  off. Gate on it.
+  off. Gate on it — or better, weigh the pose by `Pose.cov`
+  (`estimate_pose(..., full=True)`) and the levels' `cell_px` / `bit_errors`.
+- `reproj_err_alt` close to `reproj_err` (`full=True`): the tilt is
+  ambiguous (small, nearly frontal marker); pick the solution with an IMU or
+  gravity.
 - Use `with_inner_points=True` — four corners of a small marker leave the
   rotation poorly constrained (the classic planar flip ambiguity).
 - Make sure `marker_size` is the printed **black square** side, in the unit

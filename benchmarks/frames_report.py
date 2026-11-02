@@ -6,7 +6,10 @@ level was found, why: the closest rejected quad (wrong border cells, wrong
 bits, cell contrast). With a calibration (``--calib calib.npz`` holding
 ``K`` and ``dist``; ``--fisheye`` for the fisheye model) it also writes the
 pose, its standard deviations from ``Pose.cov`` and the error of the other
-planar solution.
+planar solution. Every row also has the reading quality of the largest level
+found (``cell_px``, ``contrast``, ``bit_errors``). ``--prior`` treats the
+folder as a video (files in name order) and passes the last non-empty result
+as ``prior``, like ``FractalTracker(use_prior=True)``.
 
     python benchmarks/frames_report.py frames/ --config FRACTAL_3L_6 \\
         --size 0.18 --calib calib.npz --csv report.csv
@@ -56,6 +59,9 @@ def main():
     ap.add_argument("--calib", help="npz with K and dist (adds pose columns)")
     ap.add_argument("--fisheye", action="store_true")
     ap.add_argument("--inner", action="store_true", help="pose with inner points")
+    ap.add_argument(
+        "--prior", action="store_true", help="frames are a video: read with the last result"
+    )
     ap.add_argument("--csv", default="report.csv")
     args = ap.parse_args()
 
@@ -97,9 +103,13 @@ def main():
         "sd_ty",
         "sd_tz",
         "sd_rot_deg",
+        "cell_px",
+        "contrast",
+        "bit_errors",
     ]
     det.detect(np.zeros((64, 64), np.uint8))  # warm-up: first call allocates
-    n_any = n_outer = n_drop = n_multi = 0
+    n_any = n_outer = n_drop = n_multi = n_prior = 0
+    last = None
     with open(args.csv, "w", newline="") as f:
         w = csv.writer(f)
         w.writerow(cols)
@@ -109,7 +119,9 @@ def main():
                 print(f"skip (unreadable): {p}")
                 continue
             t0 = time.perf_counter()
-            res = det.detect(img, with_inner_points=args.inner)
+            res = det.detect(img, with_inner_points=args.inner, prior=last)
+            if args.prior and len(res):
+                last = res
             ms = (time.perf_counter() - t0) * 1e3
             allr = det.detect(img, all_instances=True)
             diag = det.diagnose(img)
@@ -146,7 +158,13 @@ def main():
                         *np.round(pose.tvec, 4),
                         *sd,
                     ]
-            w.writerow(row + pose_cols)
+            qual = [""] * 3
+            if len(res):
+                k = int(np.argmax(res.cell_px))
+                qual = [round(float(res.cell_px[k]), 2), round(float(res.contrast[k]), 1)]
+                qual.append(int(res.bit_errors[k]))
+            w.writerow(row + pose_cols + qual)
+            n_prior += bool(len(res)) and int(res.bit_errors.max()) > 0
             n_any += len(res) > 0
             n_outer += 0 in res.ids
             n_drop += len(res.inconsistent_ids) > 0
@@ -154,7 +172,8 @@ def main():
     n = len(files)
     print(
         f"{n} frames: any level {n_any / n:.1%}, outer level {n_outer / n:.1%}, "
-        f"frames with dropped levels {n_drop}, with several copies {n_multi} -> {args.csv}"
+        f"frames with dropped levels {n_drop}, with several copies {n_multi}, "
+        f"read through the prior {n_prior} -> {args.csv}"
     )
 
 
