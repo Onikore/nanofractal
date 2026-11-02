@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `tests/test_reading_acceptance.py`: floors on the synthetic shadow-edge,
   occlusion and marker-like-negative frames of `benchmarks/reading.py`.
 
+### Changed
+- CI: the `bench`, `types` and `asan` jobs build against the cached static
+  OpenCV 5 of `ci.yml` (restored in ~1 s) instead of `apt-get install
+  libopencv-dev`, which took 27 s to over 7 min depending on the mirror. The
+  system-OpenCV job of `ci.yml` keeps apt, since testing that OpenCV is its
+  purpose.
+
 ## [0.7.2] - 2026-11-02
 
 ### Added

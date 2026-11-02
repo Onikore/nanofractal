@@ -10,13 +10,24 @@ jobs:
   stubtest:
     name: stub freshness (stubtest)
     runs-on: ubuntu-latest
+    env:
+      OPENCV_VERSION: "5.0.0"
+      OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
+      CMAKE_PREFIX_PATH: ${{ github.workspace }}/.opencv5
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install OpenCV dev headers
-        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
+      # The static OpenCV 5 of ci.yml (same key): restored in ~1 s, while
+      # apt-get install libopencv-dev takes 0.5-7 min depending on the mirror.
+      - name: Cache static OpenCV 5
+        uses: actions/cache@v4
+        with:
+          path: .opencv5
+          key: opencv5-${{ hashFiles('ci/build-opencv.sh') }}
+      - name: Build static OpenCV 5
+        run: bash ci/build-opencv.sh
       - name: Build and install package
         run: pip install -e ".[test]"
       - name: Install mypy

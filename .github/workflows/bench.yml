@@ -1,7 +1,7 @@
 name: bench
 
 # Speed regression gate: builds the base commit and this one with the same
-# system OpenCV, times both on one core in alternating rounds (so drift of the
+# static OpenCV 5 (cached), times both on one core in alternating rounds (so drift of the
 # runner hits both) and fails when the new build is slower: geometric mean of
 # the cells above x1.10 or one cell above x1.25 (fractal_bench.py gate).
 
@@ -25,6 +25,10 @@ permissions:
 jobs:
   gate:
     runs-on: ubuntu-latest
+    env:
+      OPENCV_VERSION: "5.0.0"
+      OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
+      CMAKE_PREFIX_PATH: ${{ github.workspace }}/.opencv5
     steps:
       - uses: actions/checkout@v4
         with:
@@ -32,8 +36,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - name: Install OpenCV dev headers
-        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
+      # The static OpenCV 5 of ci.yml (same key): restored in ~1 s, while
+      # apt-get install libopencv-dev takes 0.5-7 min depending on the mirror.
+      - name: Cache static OpenCV 5
+        uses: actions/cache@v4
+        with:
+          path: .opencv5
+          key: opencv5-${{ hashFiles('ci/build-opencv.sh') }}
+      - name: Build static OpenCV 5
+        run: bash ci/build-opencv.sh
       - name: Pick the base commit
         env:
           PR_BASE: ${{ github.event.pull_request.base.sha }}
