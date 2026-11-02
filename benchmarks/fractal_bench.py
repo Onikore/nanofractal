@@ -5,6 +5,7 @@ Subcommands:
     dump     save the detections of every cell to an .npz (reference outputs)
     compare  re-run every cell and diff against a dumped .npz (ids exact,
              corners / inner points within --atol)
+    gate     compare --json runs of two builds; exit 1 on a slowdown (CI)
 
 Frames come from nanofractal.bench.generate_scene (seeded, numpy only), so the
 same cells are reproduced exactly across builds and machines. Typical loop:
@@ -14,6 +15,12 @@ same cells are reproduced exactly across builds and machines. Typical loop:
     ... optimise, rebuild ...
     python benchmarks/fractal_bench.py compare ref.npz
     python benchmarks/fractal_bench.py run --json new.json --vs base.json
+
+The CI gate (.github/workflows/bench.yml) times the base and the new build in
+alternating rounds, so drift of the machine (heat, neighbours) hits both, and
+takes the fastest median of each cell over the rounds:
+
+    python benchmarks/fractal_bench.py gate --base b1.json b2.json --new n1.json n2.json
 """
 
 from __future__ import annotations
@@ -169,6 +176,35 @@ def cmd_compare(args):
     sys.exit(1 if bad else 0)
 
 
+def _best(paths):
+    best: dict = {}
+    for p in paths:
+        with open(p) as fh:
+            for r in json.load(fh)["rows"]:
+                if "median_ms" in r:
+                    best[r["key"]] = min(best.get(r["key"], float("inf")), r["median_ms"])
+    return best
+
+
+def cmd_gate(args):
+    base, new = _best(args.base), _best(args.new)
+    keys = [k for k in new if k in base]
+    if not keys:
+        raise SystemExit("no common cells")
+    print(f"{'cell':34s} {'base ms':>9s} {'new ms':>9s}  new/base")
+    ratios = []
+    for k in keys:
+        ratios.append(new[k] / base[k])
+        flag = "  SLOWER" if ratios[-1] > args.max_cell else ""
+        print(f"{k:34s} {base[k]:9.3f} {new[k]:9.3f}  x{ratios[-1]:.3f}{flag}")
+    mean = float(np.exp(np.mean(np.log(ratios))))
+    print(f"geometric mean new/base: x{mean:.3f} (limit x{args.max_mean})")
+    bad = [k for k, r in zip(keys, ratios) if r > args.max_cell]
+    if mean > args.max_mean or bad:
+        print(f"regression: mean x{mean:.3f}, cells {bad}", file=sys.stderr)
+        sys.exit(1)
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -198,8 +234,13 @@ def main():
         else:
             p.add_argument("ref")
             p.add_argument("--atol", type=float, default=1e-3)
+    p = sub.add_parser("gate")
+    p.add_argument("--base", nargs="+", required=True, help="--json runs of the base build")
+    p.add_argument("--new", nargs="+", required=True, help="--json runs of the new build")
+    p.add_argument("--max-mean", type=float, default=1.10, help="limit on the mean slowdown")
+    p.add_argument("--max-cell", type=float, default=1.25, help="limit on one cell")
     args = ap.parse_args()
-    {"run": cmd_run, "dump": cmd_dump, "compare": cmd_compare}[args.cmd](args)
+    {"run": cmd_run, "dump": cmd_dump, "compare": cmd_compare, "gate": cmd_gate}[args.cmd](args)
 
 
 if __name__ == "__main__":

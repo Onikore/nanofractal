@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- CI speed gate (`.github/workflows/bench.yml`): the base commit and the new
+  one are built with the same OpenCV and timed on one core in three
+  alternating rounds; a geometric-mean slowdown above x1.10 or one cell above
+  x1.25 fails the run. `fractal_bench.py gate` does the comparison (fastest
+  median per cell over the rounds); the same build against itself gives
+  x0.994–1.003.
+- `tests/test_reading_acceptance.py`: floors on the synthetic shadow-edge,
+  occlusion and marker-like-negative frames of `benchmarks/reading.py`.
+
 ## [0.7.2] - 2026-11-02
 
 ### Added
