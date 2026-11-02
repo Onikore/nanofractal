@@ -203,6 +203,13 @@ class DetectionResult:
     # (instances) and each inner point (points_instance) belongs to.
     instances: np.ndarray | None = None  # int32 (N,), 0 = the largest copy
     points_instance: np.ndarray | None = None  # int32 (M,)
+    # Reading quality of each level (detect / detect(with_inner_points=True)):
+    # pixels per cell, mean bright minus mean dark cell (grey levels) and the
+    # cells read wrong -- always 0 except for levels accepted through
+    # detect(..., prior=...), which tolerates a few.
+    cell_px: np.ndarray | None = None  # float32 (N,)
+    contrast: np.ndarray | None = None  # float32 (N,)
+    bit_errors: np.ndarray | None = None  # int32 (N,)
 
     def __len__(self) -> int:
         return int(self.ids.shape[0])
@@ -221,6 +228,11 @@ class DetectionResult:
         if not 0 <= k < self.n_instances:
             raise IndexError(f"instance {k} of {self.n_instances}")
         sel = self.instances == k
+        q = {
+            name: getattr(self, name)[sel]
+            for name in ("cell_px", "contrast", "bit_errors")
+            if getattr(self, name) is not None
+        }
         p2d = p3d = lv = None
         if self.points_2d is not None and self.points_instance is not None:
             psel = self.points_instance == k
@@ -234,6 +246,7 @@ class DetectionResult:
             points_3d=p3d,
             multiple_instances=self.n_instances > 1,
             points_level=lv,
+            **q,
         )
 
     def __bool__(self) -> bool:
@@ -324,8 +337,17 @@ class FractalDetector:
         with_inner_points: bool = False,
         roi: "tuple[int, int, int, int] | None" = None,
         all_instances: bool = False,
+        prior: "DetectionResult | None" = None,
     ) -> DetectionResult:
         """Detect the marker levels in ``image``.
+
+        ``prior``: the last detection of this marker (e.g. the previous
+        frame's). A quad that no reading decodes but that lies where one of
+        its levels was (centre within one side, size within x1.5) is then
+        compared with that level's code only and accepted with a few wrong
+        cells (grids of 10+ cells; up to 8 of 144 for the outer level of
+        ``FRACTAL_3L_6``). Such levels have ``bit_errors > 0``. Keeps a
+        marker that flickers between read and not read at the edge of range.
 
         ``all_instances=True`` keeps every copy of the marker in view: the
         result then lists all levels of all copies, ``instances`` gives the
@@ -340,29 +362,48 @@ class FractalDetector:
             box: tuple[int, ...] = (rx, ry, rw, rh)
         else:
             box = (-1, -1, -1, -1)
-        if with_inner_points:
-            ids, corners, p2d, p3d, multi, drop, lv, inst, pinst = self._d.detect_full(
-                image, *box, multi_ok
-            )
-            return DetectionResult(
-                ids,
-                corners,
-                p2d,
-                p3d,
-                multi,
-                drop,
-                lv,
-                inst if multi_ok else None,
-                pinst if multi_ok else None,
-            )
-        ids, corners, multi, drop, inst = self._d.detect(image, *box, multi_ok)
+        self._set_prior(prior, box)
+        try:
+            if with_inner_points:
+                full, (px, con, err) = self._d.detect_full(image, *box, multi_ok)
+                ids, corners, p2d, p3d, multi, drop, lv, inst, pinst = full
+                return DetectionResult(
+                    ids,
+                    corners,
+                    p2d,
+                    p3d,
+                    multi,
+                    drop,
+                    lv,
+                    inst if multi_ok else None,
+                    pinst if multi_ok else None,
+                    px,
+                    con,
+                    err,
+                )
+            ids, corners, multi, drop, inst, (px, con, err) = self._d.detect(image, *box, multi_ok)
+        finally:
+            if prior is not None:
+                self._d.set_prior(np.zeros(0, np.int32), np.zeros((0, 4, 2), np.float32))
         return DetectionResult(
             ids=ids,
             corners=corners,
             multiple_instances=multi,
             inconsistent_ids=drop,
             instances=inst if multi_ok else None,
+            cell_px=px,
+            contrast=con,
+            bit_errors=err,
         )
+
+    def _set_prior(self, prior: "DetectionResult | None", box: "tuple[int, ...]") -> None:
+        if prior is None:
+            return
+        if not isinstance(prior, DetectionResult):
+            raise TypeError("prior must be a DetectionResult")
+        ids = np.ascontiguousarray(prior.ids, dtype=np.int32)
+        corners = np.ascontiguousarray(prior.corners, dtype=np.float32).reshape(-1, 4, 2)
+        self._d.set_prior(ids, corners, box[0], box[1])
 
     def diagnose(
         self,

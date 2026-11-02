@@ -50,6 +50,11 @@ namespace nanofractal_fast {
 struct Detection {
   int id;
   cv::Point2f corners[4];
+  // reading quality (filled at the end of detect()): pixels per cell, mean
+  // bright minus mean dark cell (grey levels) at the final corners, and the
+  // border + data cells read wrong (0 unless accepted through a prior)
+  float cell_px = 0.f, contrast = 0.f;
+  int bit_errors = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -1223,7 +1228,9 @@ public:
         continue;
       }
       QuadInfo q{};
-      const int nd = decode(approx, dec.data());
+      int nd = decode(approx, dec.data());
+      if (nd == 0 && !prior_.empty())
+        nd = prior_read(approx, dec.data());
       if (nd > 0) {
         bool kept = false;
         int kept_id = -1;
@@ -1278,7 +1285,8 @@ private:
   struct Candidate {
     int id;
     cv::Point2f c[4];
-    bool reread; // decoded only by the second reading
+    bool reread;    // decoded only by the second reading (or a prior)
+    int errors = 0; // cells read wrong (prior reading only)
   };
 
   void to_gray(const cv::Mat &img) {
@@ -1301,6 +1309,12 @@ private:
   static constexpr int kClosePassBlockDiv = 5;
 
   void detect_gray(std::vector<Detection> &out) {
+    detect_levels(out);
+    for (Detection &d : out)
+      measure(d);
+  }
+
+  void detect_levels(std::vector<Detection> &out) {
     out.clear();
     dropped_.clear();
     float scale = params.detection_scale;
@@ -1389,6 +1403,8 @@ private:
                 if (w.approx.size() != 4 || !cv::isContourConvex(w.approx))
                   continue;
                 nslots_[i] = decode(w.approx, &slots_[(size_t)i * G]);
+                if (nslots_[i] == 0 && !prior_.empty())
+                  nslots_[i] = prior_read(w.approx, &slots_[(size_t)i * G]);
               }
             }
           },
@@ -1477,6 +1493,7 @@ private:
     out.resize(cands_.size());
     for (size_t i = 0; i < cands_.size(); i++) {
       out[i].id = cands_[i].id;
+      out[i].bit_errors = cands_[i].errors;
       for (int c = 0; c < 4; c++)
         out[i].corners[c] = corners_[i * 4 + c];
     }
@@ -1681,6 +1698,7 @@ private:
       Candidate &cand = out[nout++];
       cand.id = id;
       cand.reread = false;
+      cand.errors = 0;
       std::copy(mc, mc + 4, cand.c);
     }
     if (nout > 0)
@@ -1703,9 +1721,148 @@ private:
       Candidate &cand = out[nout++];
       cand.id = id;
       cand.reread = true;
+      cand.errors = 0;
       std::copy(mc, mc + 4, cand.c);
     }
     return nout;
+  }
+
+  // Reading with a prior (set_prior): a quad no reading decoded, lying where
+  // a level of the previous detection was (centre within one side, side
+  // within x1.5), is compared with that level's code only and accepted with
+  // up to (n-2)^2/18 wrong data cells and one wrong border cell, for grids
+  // of 10+ cells and clear contrast. Measured: 600 frames of marker-like
+  // objects hold no 14-cell quad within 8 wrong cells of a FRACTAL_3L_6
+  // code and no 12-cell one within 22; 8-cell quads (excluded) come within 6.
+  static constexpr int kPriorMinCells = 10;
+  int prior_read(const std::vector<cv::Point> &quad, Candidate *out) const {
+    cv::Point2f mc[4];
+    for (int j = 0; j < 4; j++)
+      mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
+    {
+      const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
+      const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
+      if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
+        std::swap(mc[1], mc[3]);
+    }
+    const float inv = 1.f / scale_;
+    const cv::Point2f ctr = (mc[0] + mc[1] + mc[2] + mc[3]) * (0.25f * inv);
+    const float side = mean_side(mc) * inv;
+    int ids[16], nid = 0;
+    for (const Detection &p : prior_) {
+      const float ps = mean_side(p.corners);
+      const cv::Point2f pc =
+          (p.corners[0] + p.corners[1] + p.corners[2] + p.corners[3]) * 0.25f;
+      if (cv::norm(ctr - pc) < ps && side > ps / 1.5f && side < ps * 1.5f &&
+          nid < 16 && std::find(ids, ids + nid, p.id) == ids + nid)
+        ids[nid++] = p.id;
+    }
+    if (nid == 0)
+      return 0;
+    cv::Point2f rc[4];
+    refine(proc_, mc, rc);
+    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
+    int best = INT_MAX, best_id = -1, best_rot = 0;
+    for (int k = 0; k < nid; k++) {
+      const Group *g = nullptr;
+      const Code *code = nullptr;
+      for (const Group &gg : groups_)
+        for (const Code &cc : gg.codes)
+          if (cc.id == ids[k]) {
+            g = &gg;
+            code = &cc;
+          }
+      if (!code || g->n < kPriorMinCells)
+        continue;
+      const int n = g->n, sz = n - 2, tol = sz * sz / 18;
+      float val[2][18 * 18];
+      double mean[2];
+      uint8_t raw[18 * 18];
+      mean[0] = double(sample(Hm.ptr<double>(0), n, raw)) / double(n * n);
+      for (int i = 0; i < n * n; i++)
+        val[0][i] = raw[i];
+      mean[1] = exact_values(rc, n, val[1]);
+      for (int r2 = 0; r2 < 2; r2++) {
+        uint8_t inner[256], tmp[256];
+        double hi = 0, lo = 0;
+        int nhi = 0, border = 0;
+        for (int i = 0; i < n * n; i++) {
+          const bool b = val[r2][i] > mean[r2];
+          (b ? hi : lo) += val[r2][i];
+          nhi += b;
+          const int r = i / n, c = i % n;
+          if (r == 0 || c == 0 || r == n - 1 || c == n - 1)
+            border += b;
+          else
+            inner[(r - 1) * sz + c - 1] = b ? 255 : 0;
+        }
+        if (nhi == 0 || nhi == n * n || border > 1 ||
+            hi / nhi - lo / (n * n - nhi) < kRereadContrast)
+          continue;
+        for (int rot = 0; rot < 4; rot++) {
+          int e = 0;
+          for (int i = 0; i < sz * sz; i++)
+            e += code->mask[i] && inner[i] != code->bits[i];
+          if (e <= tol && border + e < best) {
+            best = border + e;
+            best_id = code->id;
+            best_rot = rot;
+          }
+          for (int i = 0; i < sz; i++)
+            for (int j = 0; j < sz; j++)
+              tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
+          std::memcpy(inner, tmp, (size_t)sz * sz);
+        }
+      }
+    }
+    if (best_id < 0)
+      return 0;
+    std::rotate(mc, mc + 4 - best_rot, mc + 4);
+    Candidate &cand = out[0];
+    cand.id = best_id;
+    cand.reread = true;
+    cand.errors = best;
+    std::copy(mc, mc + 4, cand.c);
+    return 1;
+  }
+
+  // Reading quality of a final detection on the full-resolution frame.
+  void measure(Detection &d) const {
+    int n = 0;
+    for (const Group &g : groups_)
+      for (const Code &c : g.codes)
+        if (c.id == d.id)
+          n = g.n;
+    d.cell_px = n > 0 ? mean_side(d.corners) / float(n) : 0.f;
+    d.contrast = 0.f;
+    if (n == 0)
+      return;
+    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    const cv::Mat Hm = cv::getPerspectiveTransform(unit, d.corners);
+    const double *h = Hm.ptr<double>(0);
+    float val[18 * 18];
+    double sum = 0;
+    for (int r = 0; r < n; r++)
+      for (int c = 0; c < n; c++) {
+        const double px = (c + 0.5) / n, py = (r + 0.5) / n;
+        const double w = h[6] * px + h[7] * py + h[8];
+        val[r * n + c] =
+            bilinear(gray_, float((h[0] * px + h[1] * py + h[2]) / w),
+                     float((h[3] * px + h[4] * py + h[5]) / w));
+        sum += val[r * n + c];
+      }
+    const double mean = sum / (n * n);
+    double hi = 0, lo = 0;
+    int nhi = 0;
+    for (int i = 0; i < n * n; i++)
+      if (val[i] > mean) {
+        hi += val[i];
+        nhi++;
+      } else
+        lo += val[i];
+    if (nhi > 0 && nhi < n * n)
+      d.contrast = float(hi / nhi - lo / (n * n - nhi));
   }
 
   // Samples the centres of an n x n cell grid through homography h (unit
@@ -2286,6 +2443,9 @@ public:
   // diagnose() turns the second pass off to re-run the first one
   bool close_pass_enabled_ = true;
   bool second_pass() const { return second_pass_; }
+  // Levels of the previous detection (frame coordinates) for prior_read();
+  // empty = off. Kept until changed.
+  std::vector<Detection> prior_;
 
 private:
   std::vector<int> dropped_;      // levels removed by check_levels()

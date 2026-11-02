@@ -53,6 +53,9 @@ class DetectionResult:
     points_level: npt.NDArray[np.int32] | None = ...
     instances: npt.NDArray[np.int32] | None = ...
     points_instance: npt.NDArray[np.int32] | None = ...
+    cell_px: npt.NDArray[np.float32] | None = ...
+    contrast: npt.NDArray[np.float32] | None = ...
+    bit_errors: npt.NDArray[np.int32] | None = ...
 
     @property
     def n_instances(self) -> int: ...
@@ -104,6 +107,7 @@ class FractalDetector:
         with_inner_points: bool = ...,
         roi: tuple[int, int, int, int] | None = ...,
         all_instances: bool = ...,
+        prior: DetectionResult | None = ...,
     ) -> DetectionResult: ...
     def diagnose(
         self,
@@ -155,6 +159,8 @@ class FractalTracker:
     full_frame_detections: int
     auto_scale: bool
     scale_target_px: float
+    use_prior: bool
+    prior_max_age: int
 
     def __init__(
         self,
@@ -163,6 +169,8 @@ class FractalTracker:
         pad: int = ...,
         auto_scale: bool = ...,
         scale_target_px: float = ...,
+        use_prior: bool = ...,
+        prior_max_age: int = ...,
     ) -> None: ...
     def reset(self) -> None: ...
     def detect(

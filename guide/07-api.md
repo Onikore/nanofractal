@@ -16,7 +16,7 @@ FractalDetector(config, marker_size=-1.0, params=None)
 
 | method | returns |
 |---|---|
-| `detect(image, with_inner_points=False, roi=None, all_instances=False)` | `DetectionResult`; with `all_instances=True` every copy of the marker, see `instances` |
+| `detect(image, with_inner_points=False, roi=None, all_instances=False, prior=None)` | `DetectionResult`; with `all_instances=True` every copy of the marker, see `instances`; `prior` = the last detection, see [Video](04-video.md#keeping-a-marker-at-the-edge-of-range-use_prior) |
 | `diagnose(image, roi=None)` | `Diagnosis(result, n_contours, n_not_quad, quads)` — see [Troubleshooting](08-troubleshooting.md#why-a-candidate-was-dropped) |
 | `detect_batch(images, num_threads=0, roi=None)` | `list[DetectionResult]` (no inner points) |
 | `estimate_pose(result, camera_matrix, dist_coeffs, fisheye=False, full=False)` | `(rvec, tvec, reproj_err)`, a `Pose` with `full=True`, or `None` |
@@ -39,7 +39,7 @@ Attributes: `config`, `marker_size`, `params`.
 ## FractalTracker
 
 ```text
-FractalTracker(detector, margin=0.25, pad=16, auto_scale=False, scale_target_px=400)
+FractalTracker(detector, margin=0.25, pad=16, auto_scale=False, scale_target_px=400, use_prior=False, prior_max_age=5)
 ```
 
 `auto_scale=True` shrinks the searched region (`detection_scale`, 1 down to
@@ -65,6 +65,9 @@ wide; only when the detector's own `detection_scale` is 1.
 | `points_instance` | int32 `(M,)` or `None` — copy of each inner point |
 | `multiple_instances` | `bool` — a level was seen in two separate places (two copies of the marker); only the largest of each level is returned |
 | `inconsistent_ids` | int32 `(K,)` — levels dropped because they are not where the other levels put them |
+| `cell_px` | float32 `(N,)` — pixels per cell of each level |
+| `contrast` | float32 `(N,)` — mean bright minus mean dark cell, grey levels |
+| `bit_errors` | int32 `(N,)` — cells read wrong; > 0 only for levels accepted through `prior` |
 
 `len(r)`, `bool(r)`, `for level_id, corners in r`, readable `repr`;
 `r.n_instances`, `r.instance(k)` (copy `k` as its own `DetectionResult`).

@@ -76,6 +76,21 @@ static void fill(const std::vector<Detection> &markers,
   }
 }
 
+// (cell_px float32 (N,), contrast float32 (N,), bit_errors int32 (N,))
+static nb::tuple quality(const std::vector<Detection> &m) {
+  const size_t n = m.size();
+  std::vector<float> px(n), con(n);
+  std::vector<int32_t> err(n);
+  for (size_t i = 0; i < n; i++) {
+    px[i] = m[i].cell_px;
+    con[i] = m[i].contrast;
+    err[i] = m[i].bit_errors;
+  }
+  return nb::make_tuple(make_owned<float>(std::move(px), {n}),
+                        make_owned<float>(std::move(con), {n}),
+                        ids_to_numpy(std::move(err)));
+}
+
 static nb::object int_array(const std::vector<int> &v) {
   return nb::cast(ids_to_numpy(std::vector<int32_t>(v.begin(), v.end())));
 }
@@ -161,9 +176,10 @@ struct FractalDetectorImpl {
     fill(markers, ids, corners, has_roi ? (float)rx : 0.f,
          has_roi ? (float)ry : 0.f);
     size_t n = ids.size();
-    return nb::make_tuple(
-        ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
-        d.multiple_instances(), dropped_ids(d), int_array(d.instances()));
+    return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                          corners_to_numpy(std::move(corners), n),
+                          d.multiple_instances(), dropped_ids(d),
+                          int_array(d.instances()), quality(markers));
   }
 
   // detect + why every convex quad was kept or dropped (debug aid):
@@ -242,9 +258,29 @@ struct FractalDetectorImpl {
     std::vector<int32_t> ids;
     std::vector<float> corners;
     fill(markers, ids, corners, ox, oy);
-    return full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy,
-                       d.multiple_instances(), dropped_ids(d), d.points_level(),
-                       d.instances(), d.points_instance());
+    nb::tuple r =
+        full_result(std::move(ids), std::move(corners), p2d, p3d, ox, oy,
+                    d.multiple_instances(), dropped_ids(d), d.points_level(),
+                    d.instances(), d.points_instance());
+    return nb::make_tuple(r, quality(markers));
+  }
+
+  // Levels of a previous detection (full-image coordinates) used by the next
+  // detect / detect_full / diagnose calls; empty ids = none.
+  void set_prior(I32Arr ids, F32Arr corners, int rx = -1, int ry = -1) {
+    const size_t n = ids.ndim() == 1 ? ids.shape(0) : 0;
+    if (n && (corners.ndim() != 3 || corners.shape(0) != n ||
+              corners.shape(1) != 4 || corners.shape(2) != 2))
+      throw nb::value_error("prior corners must be float32 (N, 4, 2)");
+    const float ox = rx > 0 ? (float)rx : 0.f, oy = ry > 0 ? (float)ry : 0.f;
+    std::vector<Detection> &p = pool[0]->prior_;
+    p.assign(n, Detection{});
+    for (size_t i = 0; i < n; i++) {
+      p[i].id = ids.data()[i];
+      for (int c = 0; c < 4; c++)
+        p[i].corners[c] = cv::Point2f(corners.data()[i * 8 + c * 2] - ox,
+                                      corners.data()[i * 8 + c * 2 + 1] - oy);
+    }
   }
 
   // Parallel batch detection. The detector is not thread-safe, so each worker
@@ -711,6 +747,8 @@ NB_MODULE(_nanofractal, m) {
       .def("detect_batch", &FractalDetectorImpl::detect_batch,
            nb::arg("images"), nb::arg("num_threads") = 0, nb::arg("rx") = -1,
            nb::arg("ry") = -1, nb::arg("rw") = -1, nb::arg("rh") = -1)
+      .def("set_prior", &FractalDetectorImpl::set_prior, nb::arg("ids"),
+           nb::arg("corners"), nb::arg("rx") = -1, nb::arg("ry") = -1)
       .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
            nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("ids"),
            nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),

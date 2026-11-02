@@ -7,6 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `detect(..., prior=last_result)` and `FractalTracker(..., use_prior=True)`:
+  a quad no reading decodes, lying where a level of the last detection was
+  (centre within one side, size within ×1.5), is compared with that level's
+  code only and accepted with up to (n−2)²/18 wrong data cells and one wrong
+  border cell — grids of 10+ cells only (8 of 144 for the outer level of
+  `FRACTAL_3L_6`). On a landing flight video (autolanding-pi, 203 frames)
+  3 more frames with the marker (5.6 px/cell, 4–8 wrong cells under blur)
+  and 7 more with the outer level (one cell under a shadow edge); no
+  detection on 600 frames of marker-like objects with a prior placed on
+  every quad. Without a prior nothing changes (R23).
+- `DetectionResult.cell_px`, `contrast`, `bit_errors`: the reading quality
+  of every level — pixels per cell, mean bright minus mean dark cell at the
+  final corners, cells read wrong (> 0 only through a prior) — to weigh a
+  detection instead of a yes/no. `detect` speed unchanged (R22).
+
 ## [0.7.1] - 2026-10-28
 
 ### Added

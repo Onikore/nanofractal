@@ -53,6 +53,38 @@ for i in range(3):
     print(i, tracker.detect(frame).ids.tolist())
 ```
 
+### Keeping a marker at the edge of range (`use_prior`)
+
+Far away (a few pixels per cell), with blur or a shadow across a cell, a
+marker can flicker: read in one frame, one or two cells off in the next.
+`use_prior=True` hands the last result to `detect(..., prior=...)`: a quad
+where a level was a moment ago is compared with that level's code only and
+accepted with a few wrong cells. Such levels report `bit_errors > 0`; every
+level also reports `cell_px` and `contrast` — use them to weigh a detection
+instead of a yes/no. Without a prior nothing changes.
+
+```python
+det3 = nf.FractalDetector("FRACTAL_3L_6", marker_size=0.18)
+tracker = nf.FractalTracker(det3, use_prior=True)
+frame = np.full((720, 1280), 255, np.uint8)
+frame[200:480, 100:380] = nf.generate_fractal("FRACTAL_3L_6", 280)  # 20 px/cell
+res = tracker.detect(frame)
+print(res.ids.tolist(), res.cell_px.round(1).tolist(), res.bit_errors.tolist())
+
+# two cells of the outer level now read wrong (e.g. a shadow edge)
+bad = frame.copy()
+bad[240:260, 160:180] ^= 255               # outer grid cell (2, 3)
+bad[240:260, 200:220] ^= 255               # outer grid cell (2, 5)
+print(det3.detect(bad).ids.tolist())       # plain: the outer level is gone
+res = tracker.detect(bad)                  # kept, marked by bit_errors
+print(res.ids.tolist(), res.bit_errors.tolist())
+assert 0 in res.ids and 0 not in det3.detect(bad).ids
+```
+
+With your own loop, pass the last non-empty result:
+`det.detect(frame, prior=last)`. Only grids of 10+ cells are read this way
+(the outer levels); small inner codes are too close to random patterns.
+
 ## A camera loop
 
 ```python
