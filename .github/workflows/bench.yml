@@ -1,9 +1,10 @@
 name: bench
 
 # Speed regression gate: builds the base commit and this one with the same
-# static OpenCV 5 (cached), times both on one core in alternating rounds (so drift of the
-# runner hits both) and fails when the new build is slower: geometric mean of
-# the cells above x1.10 or one cell above x1.25 (fractal_bench.py gate).
+# static OpenCV 5 (cached), times both on one core in alternating rounds (so
+# drift of the runner hits both) and fails when the new build is slower:
+# geometric mean of the cells above x1.10 or one cell above x1.25
+# (fractal_bench.py gate).
 
 on:
   push:

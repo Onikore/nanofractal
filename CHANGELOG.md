@@ -24,6 +24,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   system-OpenCV job of `ci.yml` keeps apt, since testing that OpenCV is its
   purpose.
 
+### Documentation
+- `DEV.md`: the CI workflows, the speed gate, the acceptance tests, timing
+  two builds in alternating rounds. `ROADMAP.md` rules mention the gate.
+  `examples/README.md`: plain `python` commands (the ROS note moved to a
+  pointer to `DEV.md`) and a pointer to video tracking with `use_prior`.
+
 ## [0.7.2] - 2026-11-02
 
 ### Added

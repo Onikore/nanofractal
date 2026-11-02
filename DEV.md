@@ -29,6 +29,29 @@ python -m pytest tests -q --ignore tests/test_benchmarks.py
 band-parallel contour tracer against sequential `cv::findContours`. Any
 change to the hot path must keep those exact.
 
+`tests/test_reading_acceptance.py` keeps floors on the synthetic shadow-edge,
+occlusion and marker-like-negative frames of `benchmarks/reading.py`;
+`tests/test_far_reading.py` on far markers (~3 px per cell). A change that
+loses frames there fails. `tests/test_guide.py` runs every example in
+`guide/`. `tests/test_smoke.py::test_version` needs an installed package (it
+fails when the extension is only on `PYTHONPATH`).
+
+## CI
+
+| workflow | what |
+|---|---|
+| `ci.yml` | build and tests against the system OpenCV 4 (apt) and a static OpenCV 5 (AVX2), coverage |
+| `asan.yml` | tests under AddressSanitizer / UBSan |
+| `types.yml` | stubs match the extension (`mypy.stubtest`) |
+| `lint.yml` | `pre-commit` (ruff, ruff-format, …) |
+| `bench.yml` | speed gate: the base commit against the new one, see below |
+| `bench-arm.yml` | manual: aarch64 tests and NEON against scalar timings |
+| `release.yml` | wheels for every platform, tested; publishes on a `v*` tag |
+
+`asan`, `types` and `bench` build against the static OpenCV 5 that `ci.yml`
+caches (key: hash of `ci/build-opencv.sh`), restored in about a second;
+installing `libopencv-dev` with apt takes from 30 s to over 7 min.
+
 ## Performance work
 
 ```bash
@@ -41,7 +64,16 @@ python benchmarks/robustness.py --json after.json         # quality unchanged?
 ```
 
 Measure single-core numbers with `--threads 1` and a pinned core
-(`taskset -c N` on Linux); all-core numbers with `--threads 0`.
+(`taskset -c N` on Linux); all-core numbers with `--threads 0`. Time the two
+builds in alternating rounds, not one after the other: on a laptop the same
+build drifts by up to 16 % between back-to-back runs.
+
+`bench.yml` does this on every push and pull request that touches the C++
+or the build: three alternating rounds of the base commit and the new one on
+one core, compared by `fractal_bench.py gate` (fastest median per cell). It
+fails when the geometric mean of the cells is more than x1.10 slower or one
+cell more than x1.25; the same build against itself gives x0.99–1.01.
+`workflow_dispatch` takes another base (a tag, say) to compare releases.
 
 ## Environment note (ROS machines)
 

@@ -79,17 +79,16 @@ pip install opencv-python
 All examples are designed to work independently and generate fallback data if inputs are missing:
 
 ```bash
-# Generate a marker and detect it
-env -u PYTHONPATH .venv/bin/python examples/detect_image.py
-
-# Estimate pose with a generated marker
-env -u PYTHONPATH .venv/bin/python examples/pose_estimation.py
-
-# Batch process synthetic frames
-env -u PYTHONPATH .venv/bin/python examples/batch_processing.py
-
-# Live webcam (requires opencv-python)
-env -u PYTHONPATH .venv/bin/python examples/webcam.py
+python examples/detect_image.py        # generate a marker and detect it
+python examples/pose_estimation.py     # estimate pose with a generated marker
+python examples/batch_processing.py    # batch process synthetic frames
+python examples/webcam.py              # live webcam (requires opencv-python)
 ```
 
-> **Note:** The `env -u PYTHONPATH` prefix is required in the nanofractal development environment to avoid conflicts with ROS paths. Omit it if not using ROS.
+> **Note:** in a shell that sources a ROS workspace, run Python with
+> `env -u PYTHONPATH` (see `DEV.md`).
+
+For video from a moving camera (a drone landing, say), see
+[guide/04-video.md](../guide/04-video.md): `FractalTracker(..., auto_scale=True,
+use_prior=True)` and the reading quality of every level (`res.cell_px`,
+`res.contrast`, `res.bit_errors`).
