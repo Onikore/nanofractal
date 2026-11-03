@@ -1819,8 +1819,9 @@ private:
     if (nid == 0)
       return 0;
     const int max_border = mode == kHint ? hint_border_ : 1;
-    cv::Point2f rc[4];
+    cv::Point2f rc[4], ec[4];
     refine(proc_, mc, rc);
+    const bool have_ec = edge_fit(rc, ec);
     const cv::Mat Hm = from_unit(mc);
     int best = INT_MAX, best_id = -1, best_rot = 0;
     int lk_border = INT_MAX, lk_bits = INT_MAX, lk_id = -1;
@@ -1838,9 +1839,15 @@ private:
         continue;
       const int n = g->n, sz = n - 2;
       const int tol = sz * sz / (mode == kHint ? hint_div_ : 18);
-      GridRead rd[2];
+      GridRead rd[3];
       read_twice(Hm.ptr<double>(0), rc, n, rd);
-      for (GridRead &r : rd) {
+      int nr = 2;
+      if (have_ec) { // third reading: edge-fitted corners, sharpened cells
+        float val[18 * 18];
+        binarize(val, sharp_values(ec, n, val), n, rd[nr++]);
+      }
+      for (int k = 0; k < nr; k++) {
+        GridRead &r = rd[k];
         if (r.nhi == 0 || r.nhi == n * n || r.border > max_border ||
             r.contrast < (mode == kHint ? kHintContrast : kRereadContrast))
           continue;
@@ -2062,6 +2069,99 @@ private:
     binarize(val, m0, n, r[0]);
     const double m1 = exact_values(rc, n, val);
     binarize(val, m1, n, r[1]);
+  }
+
+  // Edge refinement (after AprilTag 3): each side of quad q moves to the
+  // brightness step across it -- at 12 points along the side the step is
+  // sampled at 13 offsets within +-1.5 px and its weighted centre taken --
+  // and is fitted with a line; the corners become the intersections of
+  // adjacent lines. false for a short or flat side, or a corner that would
+  // move more than a quarter of the side.
+  bool edge_fit(const cv::Point2f *q, cv::Point2f *out) const {
+    cv::Point2f mu[4], dir[4];
+    float side = 0.f;
+    for (int k = 0; k < 4; k++) {
+      const cv::Point2f p0 = q[k], d = q[(k + 1) % 4] - q[k];
+      const float L = std::sqrt(d.dot(d));
+      if (L < 4.f)
+        return false;
+      side += 0.25f * L;
+      const cv::Point2f nrm(-d.y / L, d.x / L);
+      cv::Point2f P[12];
+      float W[12];
+      int np = 0;
+      for (int s = 0; s < 12; s++) {
+        const cv::Point2f base = p0 + d * (0.15f + 0.7f * float(s) / 11.f);
+        float msum = 0.f, osum = 0.f, mmax = 0.f;
+        for (int j = 0; j < 13; j++) {
+          const float o = -1.5f + 0.25f * float(j);
+          const cv::Point2f a = base + nrm * (o + 0.5f),
+                            b = base + nrm * (o - 0.5f);
+          const float m =
+              std::fabs(bilinear(proc_, a.x, a.y) - bilinear(proc_, b.x, b.y));
+          msum += m;
+          osum += m * o;
+          mmax = std::max(mmax, m);
+        }
+        if (msum <= 0.f)
+          continue;
+        P[np] = base + nrm * (osum / msum);
+        W[np++] = mmax;
+      }
+      if (np < 4)
+        return false;
+      cv::Point2f c(0.f, 0.f);
+      float wsum = 0.f;
+      for (int i = 0; i < np; i++) {
+        c += P[i] * W[i];
+        wsum += W[i];
+      }
+      c *= 1.f / wsum;
+      float cxx = 0.f, cxy = 0.f, cyy = 0.f;
+      for (int i = 0; i < np; i++) {
+        const cv::Point2f e = P[i] - c;
+        cxx += W[i] * e.x * e.x;
+        cxy += W[i] * e.x * e.y;
+        cyy += W[i] * e.y * e.y;
+      }
+      const float ang = 0.5f * std::atan2(2.f * cxy, cxx - cyy);
+      mu[k] = c;
+      dir[k] = cv::Point2f(std::cos(ang), std::sin(ang));
+    }
+    for (int k = 0; k < 4; k++) { // corner k: sides k-1 and k
+      const cv::Point2f a = mu[(k + 3) % 4], u = dir[(k + 3) % 4];
+      const cv::Point2f b = mu[k], v = dir[k], w = b - a;
+      const float det = v.x * u.y - u.x * v.y;
+      if (std::fabs(det) < 1e-6f)
+        return false;
+      out[k] = a + u * ((v.x * w.y - w.x * v.y) / det);
+      const cv::Point2f mv = out[k] - q[k];
+      if (mv.dot(mv) > 0.0625f * side * side)
+        return false;
+    }
+    return true;
+  }
+
+  // Cell-centre values sharpened at the sample points (2 x value minus the
+  // mean of the four neighbours 1 px away: an unsharp mask without
+  // filtering the frame); returns their mean.
+  double sharp_values(const cv::Point2f *rc, int n, float *val) const {
+    const cv::Mat Hm = from_unit(rc);
+    const double *h = Hm.ptr<double>(0);
+    double sum = 0;
+    for (int r = 0; r < n; r++)
+      for (int c = 0; c < n; c++) {
+        const double px = (c + 0.5) / n, py = (r + 0.5) / n;
+        const double w = h[6] * px + h[7] * py + h[8];
+        const float x = float((h[0] * px + h[1] * py + h[2]) / w),
+                    y = float((h[3] * px + h[4] * py + h[5]) / w);
+        const float around =
+            bilinear(proc_, x + 1.f, y) + bilinear(proc_, x - 1.f, y) +
+            bilinear(proc_, x, y + 1.f) + bilinear(proc_, x, y - 1.f);
+        val[r * n + c] = 2.f * bilinear(proc_, x, y) - 0.25f * around;
+        sum += val[r * n + c];
+      }
+    return sum / (n * n);
   }
 
   // Bilinear sample with pixel centres at integer coordinates (clamped).

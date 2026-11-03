@@ -131,6 +131,13 @@ the image: `side ≈ size · f / height` (metres, focal length in pixels).
   border and data cells, contrast — to steer towards the marker before its
   cells read.
 
+Every tolerant reading — `prior`, `capture_frames`, `expected_side_px` —
+reads a quad a third way besides the two the plain reading uses: its sides
+fitted to the brightness step across them (after AprilTag 3's edge
+refinement) and each cell sharpened (twice its value minus the mean of its
+neighbours 1 px away). At 2.5–3 px per cell that takes about 3 wrong cells
+off; it reads nothing where there is no marker.
+
 Leave room for the height error and for tilt (the side shrinks by cos θ): ±30 %
 is a reasonable window. A wrong height costs nothing in reading: every quad
 is read the plain way first, so a marker that reads without the hint reads
@@ -156,9 +163,9 @@ assert len(res) == 0 and res.lookalikes[0].bit_errors == 18
 ```
 
 Flight videos (8027 frames, the window ±30 % around the marker's size,
-tracker with `capture_frames=3`): 4818 frames with the marker against 4480,
-the first read 9–36 s earlier on five approaches, lookalikes on 92 more
-frames. Where there is no marker
+tracker with `capture_frames=3`): 4976 frames with the marker against 4601,
+the first read 13–36 s earlier than in 0.7.3 on five approaches, lookalikes
+on 49 more frames. Where there is no marker
 (611 flight and synthetic frames, every window from 20 to 96 px) no
 detection and no lookalike; the closest quad of the expected size there is
 25+ cells off the code, the marker on the approach 9–24. Cost: +0.2–0.3 ms

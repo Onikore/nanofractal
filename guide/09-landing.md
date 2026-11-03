@@ -39,7 +39,7 @@ def landing_step(frame, height_m=None):
   next frames through the last result, so a few cells lost to blur do not
   drop it) and picks it up before its first clean read.
 - `expected_side_px` from the height reads a far marker with a looser
-  tolerance — on overexposed flight video the first read came 9–36 s
+  tolerance — on overexposed flight video the first read came 13–36 s
   earlier — and fills `res.lookalikes` when the cells still do not read.
 - A wrong height does not lose a marker that reads without it; with no
   height, pass `None`.

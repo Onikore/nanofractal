@@ -8,6 +8,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Tolerant readings (`prior`, `capture_frames`, `expected_side_px`) read a
+  quad a third way: its sides fitted to the brightness step across them
+  (AprilTag 3-style edge refinement: 12 points per side, the step's
+  weighted centre within +-1.5 px, a line fit, corners at the
+  intersections) and each cell sharpened at its sample point (2 x value
+  minus the mean of its neighbours 1 px away). On the rejected 20-60 px
+  quads of the flight videos the wrong cells drop by 2.7 on average (within
+  14: 314 -> 421 frames); with no marker the closest quad stays 30+ cells
+  off. Flight videos: tracker with `capture_frames=3` 4480 -> 4601 frames
+  with the marker, with the size hint 4818 -> 4976, first reads 4-24
+  frames earlier; no detection on 1215 static scenes without the marker
+  (all four configurations, 4 frames each) nor on 611 frames x 5 size
+  windows. Plain `detect` is unchanged (bit-identical).
 - CI about 4 -> 2.5 min per run: sccache keeps compiled objects across runs
   (builds without isolation into the fixed build-dir, so the keys match; the
   speed gate builds the new commit, then the base in the same checkout:
