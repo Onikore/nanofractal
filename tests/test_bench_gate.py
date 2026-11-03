@@ -1,4 +1,4 @@
-"""The speed regression gate of benchmarks/fractal_bench.py (CI bench.yml)."""
+"""The speed regression gate of benchmarks/fractal_bench.py (the CI bench job)."""
 
 import importlib.util
 import json

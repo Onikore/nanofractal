@@ -38,19 +38,31 @@ fails when the extension is only on `PYTHONPATH`).
 
 ## CI
 
-| workflow | what |
-|---|---|
-| `ci.yml` | build and tests against the system OpenCV 4 (apt) and a static OpenCV 5 (AVX2), coverage |
-| `asan.yml` | tests under AddressSanitizer / UBSan |
-| `types.yml` | stubs match the extension (`mypy.stubtest`) |
-| `lint.yml` | `pre-commit` (ruff, ruff-format, …) |
-| `bench.yml` | speed gate: the base commit against the new one, see below |
-| `bench-arm.yml` | manual: aarch64 tests and NEON against scalar timings |
-| `release.yml` | wheels for every platform, tested; publishes on a `v*` tag |
+Three workflows. `ci.yml` is one run per push or pull request (one
+notification), with these jobs:
 
-`asan`, `types` and `bench` build against the static OpenCV 5 that `ci.yml`
-caches (key: hash of `ci/build-opencv.sh`), restored in about a second;
-installing `libopencv-dev` with apt takes from 30 s to over 7 min.
+| job | what |
+|---|---|
+| `lint` | `pre-commit` (ruff, ruff-format, clang-format, …); the other jobs wait for it |
+| `test` | build and tests against the system OpenCV 4 (apt), coverage |
+| `test-opencv5` | build and tests against a static OpenCV 5 (AVX2) |
+| `types` | stubs match the extension (`mypy.stubtest`) |
+| `asan` | tests under AddressSanitizer / UBSan |
+| `bench` | speed gate: the base commit against the new one, see below |
+
+A newer push to the same branch cancels the run in progress; commits that
+only touch notes (CHANGELOG, ROADMAP, the test plan, DEV, …) do not run it —
+README and `guide/` do, their examples are tests. All jobs but `test` build
+against the static OpenCV 5 cached by key (hash of `ci/build-opencv.sh`),
+restored in about a second; installing `libopencv-dev` with apt takes from
+30 s to over 7 min.
+
+`bench-arm.yml` (manual) runs the tests on aarch64 and times NEON against the
+scalar paths; `release.yml` builds and tests the wheels of every platform and
+publishes on a `v*` tag.
+
+To get mail only when something fails: GitHub → Settings → Notifications →
+System → Actions → "Only notify for failed workflows".
 
 ## Performance work
 
@@ -68,8 +80,7 @@ Measure single-core numbers with `--threads 1` and a pinned core
 builds in alternating rounds, not one after the other: on a laptop the same
 build drifts by up to 16 % between back-to-back runs.
 
-`bench.yml` does this on every push and pull request that touches the C++
-or the build: three alternating rounds of the base commit and the new one on
+The `bench` job of `ci.yml` does this on every push and pull request: three alternating rounds of the base commit and the new one on
 one core, compared by `fractal_bench.py gate` (fastest median per cell). It
 fails when the geometric mean of the cells is more than x1.10 slower or one
 cell more than x1.25; the same build against itself gives x0.99–1.01.

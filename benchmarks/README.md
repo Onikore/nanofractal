@@ -34,7 +34,7 @@ python benchmarks/fractal_bench.py gate --base b1.json b2.json --new n1.json n2.
 | `--max-mean / --max-cell` | (`gate`) slowdown limits, default x1.10 for the geometric mean of the cells, x1.25 for one cell; exit 1 above |
 
 `gate` takes the fastest median of every cell over the given runs. CI
-(`.github/workflows/bench.yml`) builds the base commit and the new one, times
+(the `bench` job of `.github/workflows/ci.yml`) builds the base commit and the new one, times
 them on one core in three alternating rounds and gates on the result: the same
 build against itself gives x0.994–1.003, while one build timed twice in a row
 drifts by up to 16 % on a laptop.

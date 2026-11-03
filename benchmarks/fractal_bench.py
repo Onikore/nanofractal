@@ -16,7 +16,7 @@ same cells are reproduced exactly across builds and machines. Typical loop:
     python benchmarks/fractal_bench.py compare ref.npz
     python benchmarks/fractal_bench.py run --json new.json --vs base.json
 
-The CI gate (.github/workflows/bench.yml) times the base and the new build in
+The CI gate (``bench`` job of .github/workflows/ci.yml) times the base and the new build in
 alternating rounds, so drift of the machine (heat, neighbours) hits both, and
 takes the fastest median of each cell over the rounds:
 

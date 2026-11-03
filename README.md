@@ -20,7 +20,10 @@ markers seen from very close on dark frames (a second threshold pass);
 0.7.2 reports the reading quality of every level and keeps a marker that
 flickers at the edge of range (`prior` / `FractalTracker(use_prior=True)`).
 0.7.3 picks up a marker that is in view but never read yet, once it holds
-its place for a few frames (`FractalTracker(capture_frames=3)`).
+its place for a few frames (`FractalTracker(capture_frames=3)`). 0.7.4 reads
+a far marker with a looser tolerance when its size is known from the height
+(`expected_side_px`), reports lookalikes, and gives one number for the pose
+uncertainty (`Pose.sd_t`).
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most

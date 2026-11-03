@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.4] - 2026-11-03
+
 ### Added
 - `detect(..., expected_side_px=(lo, hi))` and
   `FractalTracker.detect(..., expected_side_px=...)`: the outer level's side
@@ -31,7 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   about x5 from frame to frame (2 degrees of freedom), +-13 % with every
   level.
 
+### Changed
+- CI: `ci.yml`, `lint.yml`, `types.yml`, `asan.yml` and `bench.yml` are one
+  workflow (`ci.yml`, jobs `lint`, `test`, `test-opencv5`, `types`, `asan`,
+  `bench`): one run and one notification per push instead of five. Lint gates
+  the other jobs, a newer push cancels the run in progress, and commits that
+  only touch notes skip CI. `DEV.md` says how to get mail on failures only.
+
 ### Documentation
+- Size hint and pose uncertainty: `guide/04` section with a runnable example
+  (and what a wrong height does), `guide/03` (`sd_t`, its spread with 4
+  points), `guide/05`, `guide/07`, `guide/08`, README. `ROADMAP.md`: R25,
+  R26, and what is not taken from the same request (contrast normalisation).
 - README: the Python examples are self-contained (a generated test frame
   instead of `scene.png`, a camera matrix, stand-in frames) and run by
   `tests/test_guide.py` with the guide's; the performance table re-measured
