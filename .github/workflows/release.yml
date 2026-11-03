@@ -1,7 +1,8 @@
 name: release
 
 # Build portable wheels (manylinux x86_64/aarch64, macOS arm64/x86_64, Windows
-# AMD64) + sdist and publish to PyPI on a version tag.
+# AMD64) + sdist and publish to PyPI on a version tag, then create the GitHub
+# Release of that tag (notes from CHANGELOG.md, the wheels and sdist attached).
 # Push a tag like v0.1.0 to trigger a release:
 #   git tag v0.1.0 && git push origin v0.1.0
 on:
@@ -98,10 +99,9 @@ jobs:
     needs: [wheels, wheels_macos, wheels_windows, sdist]
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/v')
-    # OIDC Trusted Publishing — no stored PyPI token. REQUIRES a one-time PyPI
-    # setup: project -> Publishing -> add a GitHub publisher (owner: Onikore,
-    # repo: nanofractal, workflow: release.yml, environment: pypi). Until that
-    # exists on PyPI, the publish step fails — configure it before the next tag.
+    # OIDC Trusted Publishing, no stored PyPI token: the PyPI project has a
+    # GitHub publisher (owner Onikore, repo nanofractal, workflow release.yml,
+    # environment pypi), see PUBLISHING.md.
     environment: pypi
     permissions:
       id-token: write
@@ -112,3 +112,33 @@ jobs:
           path: dist
           merge-multiple: true
       - uses: pypa/gh-action-pypi-publish@release/v1
+
+  github_release:
+    name: GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: cibw-*
+          path: dist
+          merge-multiple: true
+      - name: Release notes from CHANGELOG.md
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          awk -v v="$v" 'index($0, "## [" v "]") == 1 {on = 1; next}
+                         on && /^## \[/ {exit}
+                         on {print}' CHANGELOG.md > notes.md
+          test -s notes.md || echo "See CHANGELOG.md." > notes.md
+          printf '\n**Install:** `pip install nanofractal==%s` · **Docs:** %s\n' \
+            "$v" "https://onikore.github.io/nanofractal/" >> notes.md
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" dist/* --verify-tag
+          --title "nanofractal ${GITHUB_REF_NAME#v}" --notes-file notes.md

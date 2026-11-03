@@ -24,6 +24,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   size hint with lookalikes, `diagnose`) gives identical results on 810
   flight frames.
 - `FractalTracker.reset()` also forgets the age of the last result.
+- `release.yml` creates the GitHub Release of each version tag after the
+  PyPI upload: the CHANGELOG section of that version as notes, the wheels and
+  the sdist attached.
 
 ### Documentation
 - Documentation site on GitHub Pages: <https://onikore.github.io/nanofractal/>,

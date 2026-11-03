@@ -25,6 +25,10 @@ git tag -a vX.Y.Z -m "nanofractal X.Y.Z"
 git push origin vX.Y.Z     # triggers the release workflow -> PyPI
 ```
 
+After the PyPI upload the workflow creates the GitHub Release of the tag:
+the notes are that version's section of `CHANGELOG.md` (keep its heading as
+`## [X.Y.Z] - date`), the wheels and the sdist are attached.
+
 Each release needs a **new version** — PyPI rejects re-uploading an existing one.
 Pushing to `main` only runs the CI checks; it does **not** publish.
 `workflow_dispatch` on any branch builds and tests all wheels without
