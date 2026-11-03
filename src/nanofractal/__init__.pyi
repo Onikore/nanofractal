@@ -6,6 +6,8 @@ from typing import Iterator, Literal, NamedTuple, Sequence, overload
 import numpy as np
 import numpy.typing as npt
 
+from . import _nanofractal
+
 # ── Public API ────────────────────────────────────────────────────────────────
 __version__: str
 
@@ -89,6 +91,7 @@ class Diagnosis:
 class FractalDetector:
     config: str
     marker_size: float
+    _d: _nanofractal.FractalDetector  # the extension object (FractalTracker uses it)
 
     def __init__(
         self,
