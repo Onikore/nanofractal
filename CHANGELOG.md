@@ -8,6 +8,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Changed
+- Outer corners are refined with a window that follows the size of each
+  level (`subpix_win_size = -1`, the default: side / 20 px, from 2 to 9)
+  instead of the reference's fixed 4. Rendered markers with blur and noise,
+  mean corner error: 35 px 0.75 -> 0.52, 50 px 0.48 -> 0.36, 80 px 0.24
+  (same), 140 px 0.24 -> 0.18, 250 px 0.24 -> 0.16 px (aruco2's rule,
+  3 x side / 34, grows too soon: 0.82 px at 80 px). `subpix_win_size = 4`
+  gives the reference's corners bit for bit (the equivalence tests use it);
+  inner points keep 4.
 - Tolerant readings (`prior`, `capture_frames`, `expected_side_px`) read a
   quad a third way: its sides fitted to the brightness step across them
   (AprilTag 3-style edge refinement: 12 points per side, the step's

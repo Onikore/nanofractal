@@ -22,6 +22,7 @@ CONFIGS = ["FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"]
 
 def _params(**kw):
     p = nf.DetectorParams()
+    p.subpix_win_size = 4  # the reference's window (the default follows the marker size)
     for k, v in kw.items():
         setattr(p, k, v)
     return p
@@ -96,7 +97,9 @@ def test_bgr_and_odd_sizes_identical():
 def test_inner_points_same_markers():
     img = generate_scene(1280, 720, "perspective")
     ref = _nf._reference_detect("FRACTAL_5L_6", 1.0, _params(), img, True)
-    got = nf.FractalDetector("FRACTAL_5L_6", marker_size=1.0).detect(img, with_inner_points=True)
+    got = nf.FractalDetector("FRACTAL_5L_6", marker_size=1.0, params=_params()).detect(
+        img, with_inner_points=True
+    )
     _check_against_reference(got, ref[0], ref[1])
     assert got.points_2d.shape[0] > 0
 

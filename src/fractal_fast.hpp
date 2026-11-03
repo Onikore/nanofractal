@@ -1312,8 +1312,34 @@ private:
       gray_ = img;
   }
 
+  // Corner refinement window of the inner points (and of the reference).
   int subpix() const {
     return params.subpix_win_size == -1 ? 4 : params.subpix_win_size;
+  }
+
+  // Outer corners of each level (4 per level in pts): params.subpix_win_size,
+  // or by default (-1) a window that follows the level's size -- side / 20
+  // px, from 2 to 9. Rendered markers with blur and noise, mean corner
+  // error against the reference's fixed 4: 35 px 0.75 -> 0.52, 50 px 0.48
+  // -> 0.36, 80 px 0.24 (same), 140 px 0.24 -> 0.18, 250 px 0.24 -> 0.16
+  // (aruco2's rule, 3 x side / 34, grows too soon: 0.82 at 80 px).
+  void refine_outer(std::vector<cv::Point2f> &pts) const {
+    const cv::TermCriteria crit(
+        cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005);
+    if (params.subpix_win_size != -1) {
+      const int w = params.subpix_win_size;
+      if (w > 0)
+        cv::cornerSubPix(gray_, pts, cv::Size(w, w), cv::Size(-1, -1), crit);
+      return;
+    }
+    std::vector<cv::Point2f> level(4);
+    for (size_t i = 0; i + 4 <= pts.size(); i += 4) {
+      const int w =
+          std::min(9, std::max(2, int(mean_side(&pts[i]) / 20.f + 0.5f)));
+      level.assign(pts.begin() + i, pts.begin() + i + 4);
+      cv::cornerSubPix(gray_, level, cv::Size(w, w), cv::Size(-1, -1), crit);
+      std::copy(level.begin(), level.end(), pts.begin() + i);
+    }
   }
 
   // Second pass (params.close_pass): frame width after shrinking, and the
@@ -1542,12 +1568,7 @@ private:
     corners_.clear();
     for (const auto &m : cands_)
       corners_.insert(corners_.end(), m.c, m.c + 4);
-    const int sp = subpix();
-    if (sp > 0)
-      cv::cornerSubPix(
-          gray_, corners_, cv::Size(sp, sp), cv::Size(-1, -1),
-          cv::TermCriteria(cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
-                           12, 0.005));
+    refine_outer(corners_);
     out.resize(cands_.size());
     for (size_t i = 0; i < cands_.size(); i++) {
       out[i].id = cands_[i].id;
