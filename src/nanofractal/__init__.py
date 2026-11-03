@@ -187,7 +187,8 @@ class Pose(NamedTuple):
     n_inliers: int  # correspondences kept
     reproj_err_rel: float  # reproj_err / side (px) of the largest detected level
     # 6x6 covariance of (rvec, tvec) from the inliers: sigma^2 (J^T J)^-1, or
-    # None with too few points (4 corners leave 2 degrees of freedom)
+    # None with fewer than 4 points (with 4, sigma^2 rests on 2 degrees of
+    # freedom and varies a lot from frame to frame)
     cov: np.ndarray | None = None
     # the other planar (IPPE) solution and its RMS error; None if there is none
     rvec_alt: np.ndarray | None = None
@@ -587,10 +588,13 @@ class FractalDetector:
         inliers.
 
         ``full=True`` returns a :class:`Pose` named tuple instead, adding the
-        method (``"inner"`` / ``"corners"``), the number of points and inliers
-        and ``reproj_err_rel`` -- the error divided by the side in pixels of
-        the largest detected level, a threshold that does not depend on how
-        big the marker is in the frame.
+        method (``"inner"`` / ``"corners"``), the number of points and inliers,
+        ``reproj_err_rel`` -- the error divided by the side in pixels of the
+        largest detected level, a threshold that does not depend on how big
+        the marker is in the frame --, the covariance ``cov`` of
+        ``(rvec, tvec)`` (``sd_t`` / ``sd_rot_deg`` sum it up in one number)
+        and the other planar solution (``rvec_alt``, ``tvec_alt``,
+        ``reproj_err_alt``).
 
         ``fisheye=True`` treats (camera_matrix, dist_coeffs) as the OpenCV fisheye
         model (dist_coeffs must be exactly 4: k1,k2,k3,k4); points are undistorted

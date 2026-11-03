@@ -1666,32 +1666,15 @@ private:
     if (N < 2)
       return;
     float side[16];
-    for (int i = 0; i < N; i++) {
-      const cv::Point2f *c = out[i].corners;
-      side[i] = 0.25f * float(cv::norm(c[0] - c[1]) + cv::norm(c[1] - c[2]) +
-                              cv::norm(c[2] - c[3]) + cv::norm(c[3] - c[0]));
-    }
+    for (int i = 0; i < N; i++)
+      side[i] = mean_side(out[i].corners);
     uint16_t agree[16] = {};
     for (int a = 0; a < N; a++) {
-      cv::Point2f plane[4];
-      const auto &ka = set_.fractalMarkerCollection.at(out[a].id).keypts;
-      for (int c = 0; c < 4; c++)
-        plane[c] = ka[c].pt;
-      const cv::Mat Hm = cv::getPerspectiveTransform(plane, out[a].corners);
-      const double *h = Hm.ptr<double>(0);
+      const cv::Mat Hm = plane_to_image(out[a]);
       for (int b = 0; b < N; b++) {
         if (b == a || side[b] > side[a] || (side[b] == side[a] && b < a))
           continue; // predict the smaller level from the larger one
-        const auto &kb = set_.fractalMarkerCollection.at(out[b].id).keypts;
-        float err = 0.f;
-        for (int c = 0; c < 4; c++) {
-          const double x = kb[c].pt.x, y = kb[c].pt.y;
-          const double w = h[6] * x + h[7] * y + h[8];
-          const cv::Point2f p(float((h[0] * x + h[1] * y + h[2]) / w),
-                              float((h[3] * x + h[4] * y + h[5]) / w));
-          err = std::max(err, float(cv::norm(p - out[b].corners[c])));
-        }
-        if (err <= kLevelTolPx + kLevelTolRel * side[b]) {
+        if (predicts(Hm, out[b], side[b])) {
           agree[a] |= uint16_t(1u << b);
           agree[b] |= uint16_t(1u << a);
         }
@@ -1717,16 +1700,8 @@ private:
   int decode(const std::vector<cv::Point> &quad, Candidate *out) const {
     int nout = 0;
     cv::Point2f mc[4];
-    for (int j = 0; j < 4; j++)
-      mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
-    { // sort corners clockwise
-      const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
-      const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
-      if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
-        std::swap(mc[1], mc[3]);
-    }
-    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
+    clockwise(quad, mc);
+    const cv::Mat Hm = from_unit(mc);
     const double *h = Hm.ptr<double>(0);
     bool second[16] = {}; // grid sizes worth a second reading
     for (size_t gi = 0; gi < groups_.size(); gi++) {
@@ -1801,8 +1776,13 @@ private:
   // *look. Flight videos (FRACTAL_3L_6, 12x12 data cells): the marker on the
   // approach reads 9-24 cells off; with no marker the closest quad of the
   // expected size is 25+ cells off (synthetic marker-like objects 30+).
+  // Hint reads accept a lower cell contrast than the second reading: on the
+  // flight videos an overexposed print at 2.5-3 px per cell reads 30-40 grey
+  // levels apart in 38 more frames (4780 -> 4818), with nothing read where
+  // there is no marker; a floor of 25 adds no frame.
   static constexpr int kPriorMinCells = 10;
   static constexpr int kLookDiv = 7;
+  static constexpr float kHintContrast = 30.f;
   enum ReadMode { kPrior = 0, kCapture, kHint };
   int prior_read(const std::vector<cv::Point> &quad, Candidate *out,
                  bool any = false) const {
@@ -1812,14 +1792,7 @@ private:
   int tolerant_read(const std::vector<cv::Point> &quad, Candidate *out,
                     int mode, Lookalike *look) const {
     cv::Point2f mc[4];
-    for (int j = 0; j < 4; j++)
-      mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
-    {
-      const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
-      const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
-      if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
-        std::swap(mc[1], mc[3]);
-    }
+    clockwise(quad, mc);
     const float inv = 1.f / scale_;
     const cv::Point2f ctr = (mc[0] + mc[1] + mc[2] + mc[3]) * (0.25f * inv);
     const float side = mean_side(mc) * inv;
@@ -1848,8 +1821,7 @@ private:
     const int max_border = mode == kHint ? hint_border_ : 1;
     cv::Point2f rc[4];
     refine(proc_, mc, rc);
-    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
+    const cv::Mat Hm = from_unit(mc);
     int best = INT_MAX, best_id = -1, best_rot = 0;
     int lk_border = INT_MAX, lk_bits = INT_MAX, lk_id = -1;
     float lk_con = 0.f;
@@ -1866,52 +1838,27 @@ private:
         continue;
       const int n = g->n, sz = n - 2;
       const int tol = sz * sz / (mode == kHint ? hint_div_ : 18);
-      float val[2][18 * 18];
-      double mean[2];
-      uint8_t raw[18 * 18];
-      mean[0] = double(sample(Hm.ptr<double>(0), n, raw)) / double(n * n);
-      for (int i = 0; i < n * n; i++)
-        val[0][i] = raw[i];
-      mean[1] = exact_values(rc, n, val[1]);
-      for (int r2 = 0; r2 < 2; r2++) {
-        uint8_t inner[256], tmp[256];
-        double hi = 0, lo = 0;
-        int nhi = 0, border = 0;
-        for (int i = 0; i < n * n; i++) {
-          const bool b = val[r2][i] > mean[r2];
-          (b ? hi : lo) += val[r2][i];
-          nhi += b;
-          const int r = i / n, c = i % n;
-          if (r == 0 || c == 0 || r == n - 1 || c == n - 1)
-            border += b;
-          else
-            inner[(r - 1) * sz + c - 1] = b ? 255 : 0;
-        }
-        if (nhi == 0 || nhi == n * n || border > max_border)
+      GridRead rd[2];
+      read_twice(Hm.ptr<double>(0), rc, n, rd);
+      for (GridRead &r : rd) {
+        if (r.nhi == 0 || r.nhi == n * n || r.border > max_border ||
+            r.contrast < (mode == kHint ? kHintContrast : kRereadContrast))
           continue;
-        const float con = float(hi / nhi - lo / (n * n - nhi));
-        if (con < kRereadContrast)
-          continue;
-        for (int rot = 0; rot < 4; rot++) {
-          int e = 0;
-          for (int i = 0; i < sz * sz; i++)
-            e += code->mask[i] && inner[i] != code->bits[i];
-          if (e <= tol && border + e < best) {
-            best = border + e;
+        for (int rot = 0; rot < 4; rot++, rotate90(r.inner, sz)) {
+          const int e = code_errors(*code, r.inner, sz);
+          if (e <= tol && r.border + e < best) {
+            best = r.border + e;
             best_id = code->id;
             best_rot = rot;
           }
           if (look && e <= sz * sz / kLookDiv &&
-              (border < lk_border || (border == lk_border && e < lk_bits))) {
-            lk_border = border;
+              (r.border < lk_border ||
+               (r.border == lk_border && e < lk_bits))) {
+            lk_border = r.border;
             lk_bits = e;
             lk_id = code->id;
-            lk_con = con;
+            lk_con = r.contrast;
           }
-          for (int i = 0; i < sz; i++)
-            for (int j = 0; j < sz; j++)
-              tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
-          std::memcpy(inner, tmp, (size_t)sz * sz);
         }
       }
     }
@@ -2005,77 +1952,36 @@ private:
   void examine(const std::vector<cv::Point> &quad, QuadInfo &q,
                bool pick) const {
     cv::Point2f mc[4], rc[4];
-    for (int j = 0; j < 4; j++)
-      mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
-    const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
-    const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
-    if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
-      std::swap(mc[1], mc[3]);
+    clockwise(quad, mc);
     refine(proc_, mc, rc);
-    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
-    const double *h = Hm.ptr<double>(0);
+    const cv::Mat Hm = from_unit(mc);
     int best = INT_MAX;
     for (const Group &g : groups_) {
       if (!pick && g.n != q.cells)
         continue;
       const int n = g.n, sz = n - 2;
-      float val[2][18 * 18];
-      double mean[2];
-      uint8_t raw[18 * 18];
-      mean[0] = double(sample(h, n, raw)) / double(n * n);
-      for (int i = 0; i < n * n; i++)
-        val[0][i] = raw[i];
-      mean[1] = exact_values(rc, n, val[1]);
-      for (int k = 0; k < 2; k++) {
-        uint8_t bits[18 * 18];
-        double hi = 0, lo = 0;
-        int nhi = 0;
-        for (int i = 0; i < n * n; i++) {
-          bits[i] = val[k][i] > mean[k] ? 255 : 0;
-          if (bits[i]) {
-            hi += val[k][i];
-            nhi++;
-          } else
-            lo += val[k][i];
-        }
-        int border = 0;
-        for (int r = 0; r < n; r++)
-          for (int c = 0; c < n; c++)
-            if ((r == 0 || c == 0 || r == n - 1 || c == n - 1) &&
-                bits[r * n + c])
-              border++;
-        uint8_t inner[256], tmp[256];
-        for (int r = 0; r < sz; r++)
-          for (int c = 0; c < sz; c++)
-            inner[r * sz + c] = bits[(r + 1) * n + c + 1];
+      GridRead rd[2];
+      read_twice(Hm.ptr<double>(0), rc, n, rd);
+      for (GridRead &r : rd) {
         int wrong = INT_MAX, id = -1;
-        for (int rot = 0; rot < 4; rot++) {
+        for (int rot = 0; rot < 4; rot++, rotate90(r.inner, sz))
           for (const Code &code : g.codes) {
             if (!pick && code.id != q.nearest_id)
               continue;
-            int e = 0;
-            for (int i = 0; i < sz * sz; i++)
-              e += code.mask[i] && inner[i] != code.bits[i];
+            const int e = code_errors(code, r.inner, sz);
             if (e < wrong) {
               wrong = e;
               id = code.id;
             }
           }
-          for (int i = 0; i < sz; i++)
-            for (int j = 0; j < sz; j++)
-              tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
-          std::memcpy(inner, tmp, (size_t)sz * sz);
-        }
-        if (border + wrong >= best)
+        if (r.border + wrong >= best)
           continue;
-        best = border + wrong;
+        best = r.border + wrong;
         q.cells = n;
-        q.border_errors = border;
+        q.border_errors = r.border;
         q.bit_errors = wrong;
         q.nearest_id = id;
-        q.contrast =
-            nhi > 0 && nhi < n * n ? float(hi / nhi - lo / (n * n - nhi)) : 0.f;
+        q.contrast = r.contrast;
       }
     }
     if (pick) {
@@ -2083,6 +1989,79 @@ private:
       for (int k = 0; k < 4; k++)
         q.c[k] = mc[k] * inv_scale;
     }
+  }
+
+  // Quad corners as floats, clockwise (the reference's order).
+  static void clockwise(const std::vector<cv::Point> &quad, cv::Point2f *mc) {
+    for (int j = 0; j < 4; j++)
+      mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
+    const double dx1 = mc[1].x - mc[0].x, dy1 = mc[1].y - mc[0].y;
+    const double dx2 = mc[2].x - mc[0].x, dy2 = mc[2].y - mc[0].y;
+    if ((dx1 * dy2) - (dy1 * dx2) < 0.0)
+      std::swap(mc[1], mc[3]);
+  }
+
+  // Homography from the unit square onto quad q.
+  static cv::Mat from_unit(const cv::Point2f *q) {
+    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
+    return cv::getPerspectiveTransform(unit, q);
+  }
+
+  // Turns an sz x sz grid by 90 degrees in place (the reference's rotation).
+  static void rotate90(uint8_t *grid, int sz) {
+    uint8_t tmp[256];
+    for (int i = 0; i < sz; i++)
+      for (int j = 0; j < sz; j++)
+        tmp[i * sz + j] = grid[(sz - 1 - j) * sz + i];
+    std::memcpy(grid, tmp, (size_t)sz * sz);
+  }
+
+  // Data cells of `inner` that differ from code (only where it is compared).
+  static int code_errors(const Code &code, const uint8_t *inner, int sz) {
+    int e = 0;
+    for (int i = 0; i < sz * sz; i++)
+      e += code.mask[i] && inner[i] != code.bits[i];
+    return e;
+  }
+
+  // An n x n grid of cell values thresholded at their mean.
+  struct GridRead {
+    int border = 0;       // border cells read bright
+    int nhi = 0;          // cells read bright
+    float contrast = 0.f; // mean bright minus mean dark cell; 0 if one class
+    uint8_t inner[256];   // data cells, 0 / 255
+  };
+  static void binarize(const float *val, double mean, int n, GridRead &r) {
+    const int sz = n - 2;
+    double hi = 0, lo = 0;
+    r.border = r.nhi = 0;
+    for (int i = 0; i < n * n; i++) {
+      const bool b = val[i] > mean;
+      (b ? hi : lo) += val[i];
+      r.nhi += b;
+      const int row = i / n, col = i % n;
+      if (row == 0 || col == 0 || row == n - 1 || col == n - 1)
+        r.border += b;
+      else
+        r.inner[(row - 1) * sz + col - 1] = b ? 255 : 0;
+    }
+    r.contrast = r.nhi > 0 && r.nhi < n * n
+                     ? float(hi / r.nhi - lo / (n * n - r.nhi))
+                     : 0.f;
+  }
+
+  // The two readings tolerant reads and diagnose() score: the reference
+  // sampler through h (contour corners), the exact one on refined corners rc.
+  void read_twice(const double *h, const cv::Point2f *rc, int n,
+                  GridRead *r) const {
+    float val[18 * 18];
+    uint8_t raw[18 * 18];
+    const double m0 = double(sample(h, n, raw)) / double(n * n);
+    for (int i = 0; i < n * n; i++)
+      val[i] = raw[i];
+    binarize(val, m0, n, r[0]);
+    const double m1 = exact_values(rc, n, val);
+    binarize(val, m1, n, r[1]);
   }
 
   // Bilinear sample with pixel centres at integer coordinates (clamped).
@@ -2141,9 +2120,7 @@ private:
 
   // Cell-centre values of an n x n grid on quad rc; returns their mean.
   double exact_values(const cv::Point2f *rc, int n, float *val) const {
-    const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
-    const cv::Mat Hm = cv::getPerspectiveTransform(unit, rc);
-    return exact_values(Hm.ptr<double>(0), n, val);
+    return exact_values(from_unit(rc).ptr<double>(0), n, val);
   }
   // ... through homography h (unit square -> image).
   double exact_values(const double *h, int n, float *val) const {
@@ -2177,11 +2154,11 @@ private:
           bits[x * n + n - 1])
         return -1;
     const int sz = n - 2;
-    uint8_t inner[256], tmp[256];
+    uint8_t inner[256];
     for (int r = 0; r < sz; r++)
       for (int c = 0; c < sz; c++)
         inner[r * sz + c] = bits[(r + 1) * n + c + 1];
-    for (nrot = 0; nrot < 4; nrot++) {
+    for (nrot = 0; nrot < 4; nrot++, rotate90(inner, sz))
       for (const Code &code : g.codes) {
         bool match = true;
         for (int i = 0; i < sz * sz && match; i++)
@@ -2190,11 +2167,6 @@ private:
         if (match)
           return code.id;
       }
-      for (int i = 0; i < sz; i++)
-        for (int j = 0; j < sz; j++)
-          tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
-      std::memcpy(inner, tmp, (size_t)sz * sz);
-    }
     return -1;
   }
 

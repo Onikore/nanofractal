@@ -27,7 +27,9 @@ uncertainty (`Pose.sd_t`).
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most
-efficiently**, parameter tuning, API reference, troubleshooting. Every Python
+efficiently**, parameter tuning, API reference, troubleshooting, and a
+[landing recipe](https://github.com/Onikore/nanofractal/blob/main/guide/09-landing.md)
+(one step per frame for a drone). Every Python
 example in it, and in this README, is executed by the test-suite.
 
 ---
@@ -234,8 +236,8 @@ tracker = nf.FractalTracker(det, use_prior=True, capture_frames=3)
 - `detect(image, expected_side_px=(lo, hi))` — the marker's size from the
   height (rangefinder): that size is read with a looser tolerance and
   `res.lookalikes` lists near misses with centre, border errors and contrast
-  (flight videos: 4780 frames with the marker instead of 4480, first read
-  7–36 s earlier; no false read or lookalike without a marker).
+  (flight videos: 4818 frames with the marker instead of 4480, first read
+  9–36 s earlier; no false read or lookalike without a marker).
 - `res.cell_px`, `res.contrast`, `res.bit_errors` — reading quality of every
   level, to weigh a detection instead of a yes/no; `Pose.sd_t` /
   `Pose.sd_rot_deg` — one number for the pose uncertainty.

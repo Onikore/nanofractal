@@ -112,7 +112,7 @@ class FractalTracker:
         """Forget the previous detection (e.g. after a scene cut)."""
         self._prev = None
         self._prev_scale = 1.0
-        self._last = None
+        self._last, self._last_age = None, 0
         self._cand, self._cand_n = None, 0
 
     def _scale(self) -> float:
@@ -179,6 +179,11 @@ class FractalTracker:
         with_inner_points: bool = False,
         expected_side_px: tuple[float, float] | None = None,
     ) -> DetectionResult:
+        """Like ``detector.detect``, near the last detection (see the class).
+
+        ``expected_side_px=(lo, hi)``: the outer level's side in pixels from
+        the height, as in :meth:`FractalDetector.detect`.
+        """
         det = self.detector
         prev = self._prev
         roi = self._roi(image.shape)

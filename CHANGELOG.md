@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Reading with a size hint (`expected_side_px`) accepts a cell contrast of
+  30 grey levels instead of 40. Flight videos (8027 frames): 4780 -> 4818
+  frames with the marker, the first read of one approach 14 s earlier (frame
+  161 -> 91, an overexposed print), lookalikes on 92 frames instead of 53;
+  where there is no marker (921 frames x 5 windows) still no detection and no
+  lookalike. A floor of 25 adds no frame. Plain `detect`, `prior` and capture
+  are unchanged.
+- `fractal_fast.hpp`: the clockwise corner order, the 90-degree turn of a
+  code grid, the code comparison and the two grid readings shared by the
+  tolerant reads and `diagnose()` are one helper each instead of copies;
+  `check_levels` uses `predicts`. Every reading path (plain, prior, capture,
+  size hint with lookalikes, `diagnose`) gives identical results on 810
+  flight frames.
+- `FractalTracker.reset()` also forgets the age of the last result.
+
+### Documentation
+- `guide/09-landing.md`: a landing recipe — one step per frame (search,
+  steer to a lookalike, pose), the height from a rangefinder, when to trust
+  the pose (running median of `Pose.sd_t`), what cannot be fixed by the
+  detector. Runnable, executed by the test-suite.
+- `guide/06`: what the parameter sweeps on flight video showed (block,
+  `adaptive_c`, `approx_poly_rate`: within 1 % of the defaults); the size
+  hint lowers `min_contour_size` for its call.
+- `estimate_pose(full=True)` and `Pose.cov` docstrings name the covariance,
+  `sd_t` / `sd_rot_deg` and the second solution; `FractalTracker.detect` has
+  a docstring.
+
 ## [0.7.4] - 2026-11-03
 
 ### Added

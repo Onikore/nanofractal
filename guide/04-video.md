@@ -122,7 +122,8 @@ the image: `side ≈ size · f / height` (metres, focal length in pixels).
 
 - quads of a level's expected size are read with a looser tolerance — up to
   3 border cells and `sz² / 10` data cells off (14 of 144 for the outer level
-  of `FRACTAL_3L_6`, against 8 with `prior`);
+  of `FRACTAL_3L_6`, against 8 with `prior`), and a lower cell contrast (30
+  grey levels instead of 40: an overexposed print);
 - the minimum contour drops to fit the expected size (a 28 px marker has a
   perimeter under the default 120);
 - quads of that size that still do not read, but come within `sz² / 7` cells
@@ -155,8 +156,9 @@ assert len(res) == 0 and res.lookalikes[0].bit_errors == 18
 ```
 
 Flight videos (8027 frames, the window ±30 % around the marker's size,
-tracker with `capture_frames=3`): 4780 frames with the marker against 4480,
-the first read 7–36 s earlier on five approaches. Where there is no marker
+tracker with `capture_frames=3`): 4818 frames with the marker against 4480,
+the first read 9–36 s earlier on five approaches, lookalikes on 92 more
+frames. Where there is no marker
 (611 flight and synthetic frames, every window from 20 to 96 px) no
 detection and no lookalike; the closest quad of the expected size there is
 25+ cells off the code, the marker on the approach 9–24. Cost: +0.2–0.3 ms

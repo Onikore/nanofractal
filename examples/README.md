@@ -88,7 +88,8 @@ python examples/webcam.py              # live webcam (requires opencv-python)
 > **Note:** in a shell that sources a ROS workspace, run Python with
 > `env -u PYTHONPATH` (see `DEV.md`).
 
-For video from a moving camera (a drone landing, say), see
-[guide/04-video.md](../guide/04-video.md): `FractalTracker(..., auto_scale=True,
-use_prior=True)` and the reading quality of every level (`res.cell_px`,
-`res.contrast`, `res.bit_errors`).
+For video from a moving camera, see [guide/04-video.md](../guide/04-video.md):
+`FractalTracker(..., auto_scale=True, use_prior=True)` and the reading quality
+of every level (`res.cell_px`, `res.contrast`, `res.bit_errors`). For a drone
+landing — search, steer to a lookalike, pose, the height from a rangefinder —
+see the recipe in [guide/09-landing.md](../guide/09-landing.md).
