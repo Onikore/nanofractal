@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   on 0.7.3 (OpenCV 4.10, AVX2: 1080p `detect` 3.21 ms on one core, 0.99 ms
   on all; `detect_batch` ~1500 frames/s), noting the cost of `close_pass`
   on frames with no marker.
+- `ROADMAP.md`: the upstream report on `getSubpixelValue` is not sent;
+  capturing right after a track is lost was measured on the flight videos
+  (no gain: 4480 frames either way) and is not taken.
 
 ## [0.7.3] - 2026-11-03
 
