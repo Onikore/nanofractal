@@ -21,3 +21,7 @@ pose_estimation.png
 
 # flight videos (never commit)
 videos/
+
+# local docs build (mkdocs build) and browser-check artefacts
+site/
+.playwright-mcp/

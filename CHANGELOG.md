@@ -24,6 +24,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `FractalTracker.reset()` also forgets the age of the last result.
 
 ### Documentation
+- Documentation site on GitHub Pages: <https://onikore.github.io/nanofractal/>,
+  built from `guide/` with MkDocs Material (`mkdocs.yml`; MkDocs 1.6.1 and
+  Material 9.7.7 pinned) by the `docs` job of `ci.yml` (`--strict`) and
+  published from `main` by the `pages` job once the tests pass. README,
+  `DEV.md` and the package metadata (`Documentation` URL) point to it.
 - `guide/09-landing.md`: a landing recipe — one step per frame (search,
   steer to a lookalike, pose), the height from a rangefinder, when to trust
   the pose (running median of `Pose.sd_t`), what cannot be fixed by the

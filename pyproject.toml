@@ -34,6 +34,7 @@ classifiers = [
 
 [project.urls]
 Homepage = "https://github.com/Onikore/nanofractal"
+Documentation = "https://onikore.github.io/nanofractal/"
 Source = "https://github.com/Onikore/nanofractal"
 Changelog = "https://github.com/Onikore/nanofractal/blob/main/CHANGELOG.md"
 Issues = "https://github.com/Onikore/nanofractal/issues"

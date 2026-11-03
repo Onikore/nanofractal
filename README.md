@@ -1,6 +1,9 @@
 # nanofractal
 
 [![codecov](https://codecov.io/gh/Onikore/nanofractal/branch/main/graph/badge.svg)](https://codecov.io/gh/Onikore/nanofractal)
+[![docs](https://img.shields.io/badge/docs-onikore.github.io%2Fnanofractal-3f51b5)](https://onikore.github.io/nanofractal/)
+
+**Documentation: <https://onikore.github.io/nanofractal/>**
 
 Fast **fractal fiducial-marker** detection for Python. Fractal markers are
 nested square markers: they stay detectable under heavy occlusion and over a
@@ -25,10 +28,11 @@ a far marker with a looser tolerance when its size is known from the height
 (`expected_side_px`), reports lookalikes, and gives one number for the pose
 uncertainty (`Pose.sd_t`).
 
-**📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
+**📖 [User guide](https://onikore.github.io/nanofractal/)** (also in
+[`guide/`](https://github.com/Onikore/nanofractal/tree/main/guide)) —
 markers and printing, detection, pose, video, **how to use it most
 efficiently**, parameter tuning, API reference, troubleshooting, and a
-[landing recipe](https://github.com/Onikore/nanofractal/blob/main/guide/09-landing.md)
+[landing recipe](https://onikore.github.io/nanofractal/09-landing/)
 (one step per frame for a drone). Every Python
 example in it, and in this README, is executed by the test-suite.
 

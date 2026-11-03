@@ -1,4 +1,4 @@
-# Landing on a marker
+# 9. Landing on a marker
 
 A recipe for a drone that lands on a fractal marker: one function per frame
 that says what to do — search, steer towards something that looks like the

@@ -49,6 +49,7 @@ notification), with these jobs:
 | `types` | stubs match the extension (`mypy.stubtest`) |
 | `asan` | tests under AddressSanitizer / UBSan |
 | `bench` | speed gate: the base commit against the new one, see below |
+| `docs`, `pages` | documentation site from `guide/`; published from `main` |
 
 A newer push to the same branch cancels the run in progress; commits that
 only touch notes (CHANGELOG, ROADMAP, the test plan, DEV, …) do not run it —
@@ -56,6 +57,16 @@ README and `guide/` do, their examples are tests. All jobs but `test` build
 against the static OpenCV 5 cached by key (hash of `ci/build-opencv.sh`),
 restored in about a second; installing `libopencv-dev` with apt takes from
 30 s to over 7 min.
+
+`docs` builds the documentation site from `guide/` with MkDocs Material
+(`mkdocs.yml`, `--strict`: a broken link fails it) and `pages` publishes it
+to <https://onikore.github.io/nanofractal/> on pushes to `main` once the
+tests pass. Locally:
+
+```bash
+pip install mkdocs==1.6.1 mkdocs-material==9.7.7
+mkdocs serve            # http://127.0.0.1:8000, reloads on edits
+```
 
 `bench-arm.yml` (manual) runs the tests on aarch64 and times NEON against the
 scalar paths; `release.yml` builds and tests the wheels of every platform and

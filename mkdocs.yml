@@ -1,0 +1,60 @@
+# Documentation site (GitHub Pages): https://onikore.github.io/nanofractal/
+# Built from guide/ by the `docs` job of .github/workflows/ci.yml; locally:
+#   pip install mkdocs==1.6.1 mkdocs-material==9.7.7 && mkdocs serve
+# (both pinned: MkDocs 2.0 drops the plugin and theme system Material uses)
+site_name: nanofractal
+site_description: Fast fractal fiducial-marker detection for Python
+site_url: https://onikore.github.io/nanofractal/
+repo_url: https://github.com/Onikore/nanofractal
+repo_name: Onikore/nanofractal
+edit_uri: edit/main/guide/
+docs_dir: guide
+
+theme:
+  name: material
+  features:
+    - content.code.copy
+    - navigation.sections
+    - navigation.footer
+    - navigation.top
+    - search.highlight
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      toggle:
+        icon: material/weather-night
+        name: Dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      toggle:
+        icon: material/weather-sunny
+        name: Light mode
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight
+  - pymdownx.superfences
+
+nav:
+  - Home: README.md
+  - Guide:
+      - 1. Markers: 01-markers.md
+      - 2. Detection: 02-detection.md
+      - 3. Pose: 03-pose.md
+      - 4. Video and cameras: 04-video.md
+      - 5. Performance: 05-performance.md
+      - 6. Tuning parameters: 06-tuning.md
+      - 7. API reference: 07-api.md
+      - 8. Troubleshooting: 08-troubleshooting.md
+      - 9. Landing on a marker: 09-landing.md
+  - Changelog: https://github.com/Onikore/nanofractal/blob/main/CHANGELOG.md
+  - PyPI: https://pypi.org/project/nanofractal/
