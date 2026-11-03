@@ -1,4 +1,4 @@
-"""Run every Python example of the user guide (guide/*.md).
+"""Run every Python example of the user guide (guide/*.md) and of README.md.
 
 Blocks of one page run in order in a shared namespace, like a reader pasting
 them into one session. A block whose first line is ``# requires: ...`` (a
@@ -10,8 +10,11 @@ import re
 
 import pytest
 
-GUIDE = pathlib.Path(__file__).resolve().parent.parent / "guide"
+ROOT = pathlib.Path(__file__).resolve().parent.parent
+GUIDE = ROOT / "guide"
 PAGES = sorted(GUIDE.glob("*.md")) if GUIDE.is_dir() else []
+if PAGES and (ROOT / "README.md").is_file():
+    PAGES.append(ROOT / "README.md")
 BLOCK = re.compile(r"```python\n(.*?)```", re.S)
 
 

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Documentation
+- README: the Python examples are self-contained (a generated test frame
+  instead of `scene.png`, a camera matrix, stand-in frames) and run by
+  `tests/test_guide.py` with the guide's; the performance table re-measured
+  on 0.7.3 (OpenCV 4.10, AVX2: 1080p `detect` 3.21 ms on one core, 0.99 ms
+  on all; `detect_batch` ~1500 frames/s), noting the cost of `close_pass`
+  on frames with no marker.
+
 ## [0.7.3] - 2026-11-03
 
 ### Added

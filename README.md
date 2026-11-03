@@ -24,8 +24,8 @@ its place for a few frames (`FractalTracker(capture_frames=3)`).
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most
-efficiently**, parameter tuning, API reference, troubleshooting. Every example
-in it is executed by the test-suite.
+efficiently**, parameter tuning, API reference, troubleshooting. Every Python
+example in it, and in this README, is executed by the test-suite.
 
 ---
 
@@ -41,15 +41,20 @@ Median latency per frame, `FRACTAL_5L_6`, synthetic scenes from
 `nanofractal.bench`, i5-12400 (6 cores / 12 threads), `NF_MARCH=x86-64-v3`,
 **OpenCV 4.10 — the configuration of the published wheels**:
 
-| scene / mode | res | 0.5, 1 core | 0.6, 1 core | 0.5, all cores | 0.6, all cores | gain (all cores) |
+| scene / mode | res | 0.5, 1 core | 0.7.3, 1 core | 0.5, all cores | 0.7.3, all cores | gain (all cores) |
 |---|---|---:|---:|---:|---:|---:|
-| marker in clutter, `detect` | 1080p | 11.3 ms | 3.18 ms | 12.3 ms | **1.14 ms** | ×10.8 |
-| marker in clutter, `with_inner_points` | 1080p | 13.4 ms | 4.23 ms | 14.4 ms | **2.29 ms** | ×6.3 |
-| no marker (clutter only) | 1080p | 12.7 ms | 2.75 ms | 13.8 ms | **0.71 ms** | ×19 |
-| marker in clutter, `detect` | 4K | 52.6 ms | 12.5 ms | 49.5 ms | **4.17 ms** | ×11.9 |
-| marker in clutter, `with_inner_points` | 4K | 54.6 ms | 16.3 ms | 55.3 ms | **7.40 ms** | ×7.5 |
-| no marker (clutter only) | 4K | 55.3 ms | 12.7 ms | 55.1 ms | **4.40 ms** | ×12.5 |
-| `detect_batch`, 48 × 1080p | — | — | — | 382 fps | **~1360 fps** | ×3.6 |
+| marker in clutter, `detect` | 1080p | 11.3 ms | 3.21 ms | 12.3 ms | **0.99 ms** | ×12.4 |
+| marker in clutter, `with_inner_points` | 1080p | 13.4 ms | 4.50 ms | 14.4 ms | **2.18 ms** | ×6.6 |
+| no marker (clutter only) | 1080p | 12.7 ms | 3.42 ms | 13.8 ms | **0.85 ms** | ×16 |
+| marker in clutter, `detect` | 4K | 52.6 ms | 12.1 ms | 49.5 ms | **4.69 ms** | ×10.6 |
+| marker in clutter, `with_inner_points` | 4K | 54.6 ms | 15.6 ms | 55.3 ms | **7.20 ms** | ×7.7 |
+| no marker (clutter only) | 4K | 55.3 ms | 13.3 ms | 55.1 ms | **4.95 ms** | ×11 |
+| `detect_batch`, 48 × 1080p | — | — | — | 382 fps | **~1500 fps** | ×3.9 |
+
+0.7.3 measured 2026-11-03 (one core pinned with `taskset`); 0.5 on the same
+machine earlier. A frame with no marker costs 0.1–0.7 ms more than in 0.6:
+it is thresholded a second time for markers seen from very close
+(`params.close_pass = False` skips that).
 
 With OpenCV 5.0 (whose own `findContours` is already ~3× faster than 4.10's)
 0.6 is 2–2.5× faster than 0.5 on one core and 3–8.5× with all cores, e.g.
@@ -58,7 +63,8 @@ With OpenCV 5.0 (whose own `findContours` is already ~3× faster than 4.10's)
 0.7 adds a SIMD prefix-scan threshold (`detect` on one core ×1.17–1.34 at
 4K, ×1.05–1.12 at 1080p) and NEON code for aarch64 (Raspberry Pi 5, one
 core: 1.5–2× faster than the scalar build). The second bit reading costs
-nothing measurable on scenes the reference already reads.
+nothing measurable on scenes the reference already reads. Every push is
+timed against the previous commit in CI and fails on a slowdown.
 
 Reproduce on your machine:
 
@@ -132,17 +138,20 @@ around it when printing. Configs: `FRACTAL_2L_6`, `FRACTAL_3L_6`,
 ### Detect
 
 ```python
-import cv2
+import numpy as np
 import nanofractal as nf
 
-image = cv2.imread("scene.png")                  # (H, W, 3) uint8 BGR
+# a test frame: the marker on a white page (or image = cv2.imread("scene.png"))
+image = np.full((900, 1200), 255, np.uint8)
+image[150:750, 300:900] = nf.generate_fractal("FRACTAL_5L_6", 600)
 det = nf.FractalDetector("FRACTAL_5L_6", marker_size=0.2)  # side in metres
 
 res = det.detect(image)
 print(res.ids)       # int32 (N,)      — one entry per visible marker level
 print(res.corners)   # float32 (N,4,2) — outer corners, sub-pixel
 for level_id, corners in res:
-    ...
+    print(level_id, corners[0])
+assert 0 in res.ids
 ```
 
 ### Pose (occlusion-robust)
@@ -154,11 +163,15 @@ so the scale is right even when only an inner level is visible); `reproj_err` (R
 poses.
 
 ```python
+camera_matrix = np.array([[1000.0, 0, 600], [0, 1000.0, 450], [0, 0, 1]])
+dist_coeffs = np.zeros(5)
+
 res = det.detect(image, with_inner_points=True)
 pose = det.estimate_pose(res, camera_matrix, dist_coeffs)       # fisheye=True for the fisheye model
 if pose is not None:
     rvec, tvec, reproj_err = pose
-    det.draw(image, res, camera_matrix, dist_coeffs, rvec, tvec)   # outlines + axes
+    print(tvec.ravel(), reproj_err)    # marker 0.2 m wide, 600 px: about 0.33 m away
+    vis = det.draw(image, res, camera_matrix, dist_coeffs, rvec, tvec)   # outlines + axes
 ```
 
 The raw correspondences are exposed too: `res.points_2d` float32 `(M, 2)`,
@@ -189,10 +202,14 @@ det.params.adaptive_c = 5.0  # changes apply to the next detect()
 ### Video
 
 ```python
+frames = [np.roll(image, 20 * k, axis=1) for k in range(5)]   # stand-in for a camera
 tracker = nf.FractalTracker(det, auto_scale=True, use_prior=True)   # margin=0.25, pad=16
 for frame in frames:
     res = tracker.detect(frame)           # det.detect(frame), plus levels read through the last result
     print(res.cell_px, res.contrast, res.bit_errors)   # reading quality per level
+
+# on a drone's approach: also pick up the marker before it is first read
+tracker = nf.FractalTracker(det, use_prior=True, capture_frames=3)
 ```
 
 ### More
