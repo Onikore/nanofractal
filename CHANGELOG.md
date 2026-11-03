@@ -22,6 +22,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with every window from 20 to 96 px (closest quad there 25+ cells off the
   code, the marker on the approach 9-24). Plain `detect` is unchanged
   (bit-identical). Cost with the hint: +0.19-0.33 ms per frame, one core.
+  A wrong hint never loses a marker the plain reading finds (same corners;
+  tested with windows of 5-6, 20-25 and 300-400 px); windows down to 5 px
+  read nothing false on 421 frames without a marker, but a tiny window
+  doubles the time of such a frame (minimum contour 16 px).
 - `Pose.sd_tvec`, `Pose.sd_t`, `Pose.sd_rot_deg`: standard deviations from
   `cov`, `sd_t` as one number for the position. With 4 points `sd_t` varies
   about x5 from frame to frame (2 degrees of freedom), +-13 % with every

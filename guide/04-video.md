@@ -131,7 +131,11 @@ the image: `side ≈ size · f / height` (metres, focal length in pixels).
   cells read.
 
 Leave room for the height error and for tilt (the side shrinks by cos θ): ±30 %
-is a reasonable window.
+is a reasonable window. A wrong height costs nothing in reading: every quad
+is read the plain way first, so a marker that reads without the hint reads
+with any hint, same corners. A far too small window only costs time (the
+minimum contour drops to fit it: (5, 8) px doubles a frame without a marker,
+0.57 → 1.17 ms on all cores) and still gave no false read.
 
 ```python
 far = np.full((240, 320), 255, np.uint8)

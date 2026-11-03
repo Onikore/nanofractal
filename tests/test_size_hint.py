@@ -106,3 +106,16 @@ def test_hint_on_clutter_finds_nothing():
         for lo in (20, 30, 45, 70):
             r = DET.detect(f, expected_side_px=(lo, lo * 1.7))
             assert len(r) == 0 and r.lookalikes == []
+
+
+@pytest.mark.parametrize("hint", [(5, 6), (300, 400), (20, 25)])
+def test_wrong_hint_keeps_a_clear_marker(hint):
+    """A wrong height must not lose a marker the plain reading finds."""
+    for img in (_small(), _small(px=140, at=(60, 40))):
+        plain = DET.detect(img)
+        r = DET.detect(img, expected_side_px=hint)
+        assert 0 in plain.ids
+        assert set(plain.ids.tolist()) <= set(r.ids.tolist())
+        for k, i in enumerate(plain.ids.tolist()):
+            j = r.ids.tolist().index(i)
+            np.testing.assert_array_equal(r.corners[j], plain.corners[k])
