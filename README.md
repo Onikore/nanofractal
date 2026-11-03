@@ -30,7 +30,10 @@ uncertainty (`Pose.sd_t`). 0.7.5 reads overexposed far markers a little
 better with the size hint and comes with a documentation site and a landing
 recipe. 0.7.6 reads a quad a third way when a few cells are off (edge-fitted
 corners, sharpened cells), refines corners with a window that follows the
-marker's size, and ships one stable-ABI wheel for Python 3.12+.
+marker's size, and ships one stable-ABI wheel for Python 3.12+. 0.7.7 goes
+back to the reference's corner window (the size-following one did not hold
+up on flight frames) and matches inner points again through a refined
+homography (a small level at the frame edge: pose 4.7 -> 0.96 px).
 
 **📖 [User guide](https://onikore.github.io/nanofractal/)** (also in
 [`guide/`](https://github.com/Onikore/nanofractal/tree/main/guide)) —
@@ -46,12 +49,9 @@ example in it, and in this README, is executed by the test-suite.
 
 The hot path (adaptive threshold, contour tracing, polygon fitting, decoding)
 is a purpose-built reimplementation: every level the reference detector
-finds is found with the same quad, and with the reference's corner window
-(`subpix_win_size = 4`) with **bit-identical corners** (checked by the
-test-suite against `_reference_detect`); it runs on all cores *within* a
-single frame. By default the corner window follows the size of each level,
-which takes about a third off the corner error of small and of large
-markers.
+finds comes back with **bit-identical corners** (checked by the test-suite
+against `_reference_detect`), and it runs on all cores *within* a single
+frame.
 
 Median latency per frame, `FRACTAL_5L_6`, synthetic scenes from
 `nanofractal.bench`, i5-12400 (6 cores / 12 threads), `NF_MARCH=x86-64-v3`,
@@ -208,7 +208,7 @@ p.min_contour_size = 60      # detect smaller markers (default 120 px perimeter)
 p.adaptive_block_size = 21   # threshold window (odd, >= 3; -1 = auto)
 p.adaptive_c = 7.0           # threshold constant
 p.approx_poly_rate = 0.05    # polygon fit epsilon = perimeter * rate
-p.subpix_win_size = -1       # corner refinement half-window: -1 = by level size, 4 = reference, 0 = off
+p.subpix_win_size = 4        # corner refinement half-window (0 = off)
 p.kfilter_min_dist = 10.0    # min distance between inner-corner keypoints
 p.close_pass = True          # retry empty frames with a large threshold block (very close markers)
 det = nf.FractalDetector("FRACTAL_5L_6", params=p)
@@ -297,9 +297,9 @@ empty frame, invalid config or parameters, invalid intrinsics → `ValueError`.
   error from 0.39 to 1.3 px.
 - **Zero-copy input, GIL released**, a detector pool for `detect_batch`.
 
-Intentional differences from the reference detector: the outer corners are
-refined with a window that follows the size of each level (side / 20, 2 to 9;
-the reference uses 4); the second bit reading
+Intentional differences from the reference detector: inner points are
+matched a second time through a homography fitted to the first matches; the
+second bit reading
 finds more levels (far, blurred, steeply tilted markers) — levels the
 reference finds are unchanged; a frame where nothing is found is thresholded
 again with a large block (`close_pass`, markers seen from very close); levels

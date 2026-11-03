@@ -48,13 +48,10 @@ def test_second_pass_corners_are_refined_at_full_resolution():
     det = nf.FractalDetector(CONFIG)
     res = det.detect(FRAMES[0])
     assert len(res)
-    # corners lie on the strong edges of the full frame: cornerSubPix again,
-    # with the window the detector picks for a level this size (side / 20,
-    # 2 to 9), moves them by far less than the 4x shrink of the second pass
-    side = np.linalg.norm(res.corners[0] - np.roll(res.corners[0], 1, 0), axis=1).mean()
-    win = int(min(9, max(2, int(side / 20 + 0.5))))
-    again = nf.refine_corners(FRAMES[0], res.corners[:1], win_size=win)
-    assert np.abs(again - res.corners[:1]).max() < 1.0
+    # corners lie on the strong edges of the full frame: cornerSubPix again
+    # moves them by far less than the 4x shrink of the second pass
+    again = nf.refine_corners(FRAMES[0], res.corners, win_size=4)
+    assert np.abs(again - res.corners).max() < 1.0
 
 
 def test_frames_with_a_marker_are_unchanged():

@@ -1,7 +1,7 @@
 # План испытаний nanofractal на Raspberry Pi 5
 
 Цель — закрыть задачи из [ROADMAP.md](ROADMAP.md), которые нельзя проверить
-синтетикой и CI. Версия для испытаний — **`nanofractal==0.7.6`**; для
+синтетикой и CI. Версия для испытаний — **`nanofractal==0.7.7`**; для
 сравнения — `0.6.1` (только там, где это сказано явно). Разделы A, B, B2
 выполнены на 0.7.0 (R4 закрыт) — их не повторять.
 
@@ -59,8 +59,8 @@ CSV: найденные уровни, `inconsistent_ids`, число копий,
   вторая такая же — для раздела I.
 
 ```bash
-python -m pip install nanofractal==0.7.6 opencv-python-headless
-git clone https://github.com/Onikore/nanofractal && cd nanofractal && git checkout v0.7.6
+python -m pip install nanofractal==0.7.7 opencv-python-headless
+git clone https://github.com/Onikore/nanofractal && cd nanofractal && git checkout v0.7.7
 python - <<'EOF' > env.txt
 import platform, nanofractal as nf
 print(platform.platform(), platform.python_version())
@@ -170,7 +170,7 @@ det = nf.FractalDetector("FRACTAL_3L_6")
 f = sorted(glob.glob("h4.4/*.png"))
 print(sum(0 in det.detect(cv2.imread(p, 0)).ids for p in f), "/", len(f))
 EOF
-pip install nanofractal==0.7.6 --force-reinstall --no-deps
+pip install nanofractal==0.7.7 --force-reinstall --no-deps
 ```
 
 С покачиванием (подряд) — ещё раз с `--prior`: это проверка R23.
@@ -257,7 +257,7 @@ pip install nanofractal==0.7.6 --force-reinstall --no-deps
 
 Кадры, на которых 0.7.0 давал 0/20 (`nanofractal-close-range`: 0.12 м,
 тёмный кадр, внешний уровень обрезан) — прогнать `frames_report.py` на
-0.7.6 **без** обхода `adaptive_block_size=31`. **Готово:** 20/20. Плюс
+0.7.7 **без** обхода `adaptive_block_size=31`. **Готово:** 20/20. Плюс
 посадка до касания (видео): сколько кадров без детекции, где хотя бы один
 уровень целиком в кадре (кадры, где все уровни обрезаны краем, пакет не
 найдёт в принципе).

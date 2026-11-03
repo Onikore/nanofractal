@@ -22,7 +22,7 @@ CONFIGS = ["FRACTAL_2L_6", "FRACTAL_3L_6", "FRACTAL_4L_6", "FRACTAL_5L_6"]
 
 def _params(**kw):
     p = nf.DetectorParams()
-    p.subpix_win_size = 4  # the reference's window (the default follows the marker size)
+    p.subpix_win_size = 4  # the reference's window (also the default, -1)
     for k, v in kw.items():
         setattr(p, k, v)
     return p

@@ -7,6 +7,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.7] - 2026-11-03
+
+### Fixed
+- Inner points of a small level read alone (a 37 px level at the frame edge,
+  autolanding-pi frame 12865 of 02.11): the homography of the level's corners
+  extrapolated poorly to the keypoints of the larger levels, a third of the
+  16 points were matched one cell off and the pose came out at 4.7 px, 0.584
+  m against 0.61 m on the rangefinder. The inner points are now matched once
+  more through a homography fitted to the first matches (RANSAC, 3 px): that
+  frame 46 points, 0.96 px, 0.619 m; rendered markers at the frame edge 50 ->
+  31 points off by 2+ px, more points; flight frames (986 with inner points)
+  +1.3 % points, frames with a pose RMS over 3 px 2 -> 0, median unchanged
+  (0.78 px).
+
+### Changed
+- The outer corners are refined with the reference's window again
+  (`subpix_win_size = -1` = 4). The window that followed the level size
+  (0.7.6) was a third more accurate on rendered markers but not on flight
+  frames: corners of 2+ levels against one plane, median 0.455 px against
+  0.450 (810 frames), and worse on the small level of frame 12865 (corner
+  pose 0.65 px against 0.18). Plain `detect` is again bit-identical to
+  0.7.5.
+
 ## [0.7.6] - 2026-11-03
 
 ### Changed

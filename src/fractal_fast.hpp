@@ -1312,34 +1312,23 @@ private:
       gray_ = img;
   }
 
-  // Corner refinement window of the inner points (and of the reference).
+  // Corner refinement window (the reference's 4 by default).
   int subpix() const {
     return params.subpix_win_size == -1 ? 4 : params.subpix_win_size;
   }
 
-  // Outer corners of each level (4 per level in pts): params.subpix_win_size,
-  // or by default (-1) a window that follows the level's size -- side / 20
-  // px, from 2 to 9. Rendered markers with blur and noise, mean corner
-  // error against the reference's fixed 4: 35 px 0.75 -> 0.52, 50 px 0.48
-  // -> 0.36, 80 px 0.24 (same), 140 px 0.24 -> 0.18, 250 px 0.24 -> 0.16
-  // (aruco2's rule, 3 x side / 34, grows too soon: 0.82 at 80 px).
+  // Outer corners of each level (4 per level in pts), with the reference's
+  // window (subpix_win_size, -1 = 4). A window that follows the level size
+  // (side / 20, 0.7.6) was a third more accurate on rendered markers but not
+  // on flight frames (corners of 2+ levels against one plane: median 0.455
+  // vs 0.450 px) and worse on a small level at the frame edge; reverted.
   void refine_outer(std::vector<cv::Point2f> &pts) const {
-    const cv::TermCriteria crit(
-        cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS, 12, 0.005);
-    if (params.subpix_win_size != -1) {
-      const int w = params.subpix_win_size;
-      if (w > 0)
-        cv::cornerSubPix(gray_, pts, cv::Size(w, w), cv::Size(-1, -1), crit);
-      return;
-    }
-    std::vector<cv::Point2f> level(4);
-    for (size_t i = 0; i + 4 <= pts.size(); i += 4) {
-      const int w =
-          std::min(9, std::max(2, int(mean_side(&pts[i]) / 20.f + 0.5f)));
-      level.assign(pts.begin() + i, pts.begin() + i + 4);
-      cv::cornerSubPix(gray_, level, cv::Size(w, w), cv::Size(-1, -1), crit);
-      std::copy(level.begin(), level.end(), pts.begin() + i);
-    }
+    const int w = subpix();
+    if (w > 0)
+      cv::cornerSubPix(
+          gray_, pts, cv::Size(w, w), cv::Size(-1, -1),
+          cv::TermCriteria(cv::TermCriteria::MAX_ITER | cv::TermCriteria::EPS,
+                           12, 0.005));
   }
 
   // Second pass (params.close_pass): frame width after shrinking, and the
@@ -2421,9 +2410,17 @@ private:
       grid_.build(kpts_, 10.f);
     cls_.assign(kpts_.size(), kUnknownClass);
 
-    for (const Projected &pr : proj_) {
-      const std::vector<cv::KeyPoint> &okp = *pr.okp;
-      if (pr.consider) {
+    // match the projected corners of the considered markers to keypoints
+    std::vector<cv::Point2f> m2, m3;
+    std::vector<int> mlev;
+    auto match = [&]() {
+      m2.clear();
+      m3.clear();
+      mlev.clear();
+      for (const Projected &pr : proj_) {
+        if (!pr.consider)
+          continue;
+        const std::vector<cv::KeyPoint> &okp = *pr.okp;
         for (size_t idx = 0; idx < pr.img.size(); idx++) {
           const cv::Point2f q = pr.img[idx];
           if (!(q.x > 0 && q.x < W && q.y > 0 && q.y < Hh))
@@ -2431,10 +2428,38 @@ private:
           const int hit =
               kpts_.empty() ? -1 : grid_.unique_within(kpts_, q, 100.0);
           if (hit >= 0 && keypoint_class(hit) == okp[idx].class_id) {
-            p2d.push_back(kpts_[hit].pt);
-            p3d.push_back(cv::Point3f(pr.obj[idx].x, pr.obj[idx].y, 0));
-            plevel_.push_back(pr.id);
+            m2.push_back(kpts_[hit].pt);
+            m3.push_back(pr.obj[idx]);
+            mlev.push_back(pr.id);
           }
+        }
+      }
+    };
+    match();
+    // The homography of the read levels' corners extrapolates poorly to far
+    // keypoints when only a small level is read (a 37 px level at the frame
+    // edge, 02.11 frame 12865: 16 points, a third assigned one cell off, pose
+    // 4.7 px). Fitted again to the matches (RANSAC) and matched once more:
+    // that frame 46 points at 0.96 px; rendered markers at the edge 50 -> 31
+    // points off by 2+ px; flight frames +1.3 % points, frames with a pose
+    // RMS over 3 px 2 -> 0, median unchanged.
+    if (m2.size() >= 8) {
+      const cv::Mat Hr = cv::findHomography(m3, m2, cv::RANSAC, 3.0);
+      if (!Hr.empty()) {
+        for (Projected &pr : proj_)
+          if (pr.consider)
+            cv::perspectiveTransform(pr.obj, pr.img, Hr);
+        match();
+      }
+    }
+    // (matches of one marker stay together, in the order of proj_)
+    size_t mi = 0;
+    for (const Projected &pr : proj_) {
+      if (pr.consider) {
+        for (; mi < m2.size() && mlev[mi] == pr.id; mi++) {
+          p2d.push_back(m2[mi]);
+          p3d.push_back(cv::Point3f(m3[mi].x, m3[mi].y, 0));
+          plevel_.push_back(pr.id);
         }
       } else {
         for (const Detection &m : det)
