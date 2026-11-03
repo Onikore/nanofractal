@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- CI about 4 -> 2.5 min per run: sccache keeps compiled objects across runs
+  (builds without isolation into the fixed build-dir, so the keys match; the
+  speed gate builds the new commit, then the base in the same checkout:
+  54 -> 19 s, 18 of 18 objects from the cache), tests on every core with
+  `pytest-xdist` (`--dist worksteal`; under ASan 2:29 -> about 1:20), pip and
+  pre-commit downloads cached, lint no longer gates the other jobs.
+  `pytest-xdist` joins the `test` extra. A cache of the apt packages was
+  tried and dropped: restored files miss the update-alternatives links.
+
 ## [0.7.5] - 2026-11-03
 
 ### Changed

@@ -9,8 +9,7 @@ name: ci
 # Speed: compiled objects are cached across runs by sccache (the extension and
 # nanobind rebuild only what changed; builds use fixed paths -- no build
 # isolation, build-dir from pyproject.toml -- so the cache keys match), the
-# static OpenCV 5 and the apt packages of the system-OpenCV job are cached,
-# pip and pre-commit downloads are cached, and the tests run on every core
+# static OpenCV 5 is cached, pip and pre-commit downloads are cached, and the tests run on every core
 # (pytest-xdist, work stealing).
 
 on:
@@ -91,12 +90,11 @@ jobs:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: pyproject.toml
-      # testing the distribution's OpenCV is the point of this job; its
-      # packages are cached instead of downloaded from a mirror every run
-      - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
-        with:
-          packages: libopencv-dev
-          version: "1"
+      # testing the distribution's OpenCV is the point of this job (a cache of
+      # the apt packages was tried: restored files miss the update-alternatives
+      # links, e.g. liblapack.so.3)
+      - name: Install OpenCV dev headers
+        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
       - uses: mozilla-actions/sccache-action@v0.0.11
         with:
           version: "v0.18.0"

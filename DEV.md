@@ -43,7 +43,7 @@ notification), with these jobs:
 
 | job | what |
 |---|---|
-| `lint` | `pre-commit` (ruff, ruff-format, clang-format, …); the other jobs wait for it |
+| `lint` | `pre-commit` (ruff, ruff-format, clang-format, …) |
 | `test` | build and tests against the system OpenCV 4 (apt), coverage |
 | `test-opencv5` | build and tests against a static OpenCV 5 (AVX2) |
 | `types` | stubs match the extension (`mypy.stubtest`) |
@@ -51,12 +51,21 @@ notification), with these jobs:
 | `bench` | speed gate: the base commit against the new one, see below |
 | `docs`, `pages` | documentation site from `guide/`; published from `main` |
 
-A newer push to the same branch cancels the run in progress; commits that
+All jobs start at once and a newer push to the same branch cancels the run
+in progress; commits that
 only touch notes (CHANGELOG, ROADMAP, the test plan, DEV, …) do not run it —
 README and `guide/` do, their examples are tests. All jobs but `test` build
 against the static OpenCV 5 cached by key (hash of `ci/build-opencv.sh`),
 restored in about a second; installing `libopencv-dev` with apt takes from
 30 s to over 7 min.
+
+Speed: sccache keeps compiled objects in the Actions cache, so a commit that
+does not touch the C++ rebuilds nothing (the speed gate's two builds: 54 →
+19 s). It needs fixed paths: build without isolation
+(`pip install $BUILD_DEPS` then `--no-build-isolation`) into the
+`build-dir` of `pyproject.toml`. Tests run with `pytest-xdist` on every core
+(`-n auto --dist worksteal`; ASan 2:29 → ~1:20). pip and pre-commit
+downloads are cached. A whole run takes about 2.5 min (4 before).
 
 `docs` builds the documentation site from `guide/` with MkDocs Material
 (`mkdocs.yml`, `--strict`: a broken link fails it) and `pages` publishes it
