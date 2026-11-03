@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `detect(..., expected_side_px=(lo, hi))` and
+  `FractalTracker.detect(..., expected_side_px=...)`: the outer level's side
+  in pixels is known (from the height). Quads of a level's expected size are
+  read with up to 3 wrong border cells and `sz^2 / 10` wrong data cells (14
+  of 144 for the outer level of `FRACTAL_3L_6`), the minimum contour drops to
+  fit the expected size, and near misses (within `sz^2 / 7` cells) come back
+  as `res.lookalikes` (`Lookalike`: corners, centre, level, border and data
+  errors, contrast). Flight videos (8027 frames, window +-30 % around the
+  marker's size, tracker with `capture_frames=3`): 4480 -> 4780 frames with
+  the marker, first read 7-36 s earlier on five approaches, lookalikes on 53
+  more frames; no detection and no lookalike on 611 frames without a marker
+  with every window from 20 to 96 px (closest quad there 25+ cells off the
+  code, the marker on the approach 9-24). Plain `detect` is unchanged
+  (bit-identical). Cost with the hint: +0.19-0.33 ms per frame, one core.
+- `Pose.sd_tvec`, `Pose.sd_t`, `Pose.sd_rot_deg`: standard deviations from
+  `cov`, `sd_t` as one number for the position. With 4 points `sd_t` varies
+  about x5 from frame to frame (2 degrees of freedom), +-13 % with every
+  level.
+
 ### Documentation
 - README: the Python examples are self-contained (a generated test frame
   instead of `scene.png`, a camera matrix, stand-in frames) and run by

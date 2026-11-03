@@ -173,7 +173,12 @@ class FractalTracker:
             return
         self._cand = DetectionResult(ids=ids[keep : keep + 1], corners=corners[keep : keep + 1])
 
-    def detect(self, image: np.ndarray, with_inner_points: bool = False) -> DetectionResult:
+    def detect(
+        self,
+        image: np.ndarray,
+        with_inner_points: bool = False,
+        expected_side_px: tuple[float, float] | None = None,
+    ) -> DetectionResult:
         det = self.detector
         prev = self._prev
         roi = self._roi(image.shape)
@@ -197,7 +202,13 @@ class FractalTracker:
             if scale < 1.0:
                 p.detection_scale = scale
             try:
-                res = det.detect(image, with_inner_points=with_inner_points, roi=roi, prior=prior)
+                res = det.detect(
+                    image,
+                    with_inner_points=with_inner_points,
+                    roi=roi,
+                    prior=prior,
+                    expected_side_px=expected_side_px,
+                )
             finally:
                 if auto:
                     p.adaptive_block_size = -1
@@ -213,7 +224,12 @@ class FractalTracker:
             if capture:
                 det._d.set_capture(True)
             try:
-                res = det.detect(image, with_inner_points=with_inner_points, prior=prior)
+                res = det.detect(
+                    image,
+                    with_inner_points=with_inner_points,
+                    prior=prior,
+                    expected_side_px=expected_side_px,
+                )
             finally:
                 if capture:
                     det._d.set_capture(False)

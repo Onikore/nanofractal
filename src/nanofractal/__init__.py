@@ -108,6 +108,18 @@ def _validate_params(p: "DetectorParams") -> None:
         raise ValueError(f"detection_scale must be finite, got {ds}")
 
 
+def _validate_hint(hint) -> "tuple[float, float] | None":
+    if hint is None:
+        return None
+    try:
+        lo, hi = (float(v) for v in hint)
+    except (TypeError, ValueError):
+        raise TypeError("expected_side_px must be a pair (lo, hi)") from None
+    if not (np.isfinite(lo) and np.isfinite(hi) and 0 < lo <= hi):
+        raise ValueError(f"expected_side_px must satisfy 0 < lo <= hi, got {hint!r}")
+    return lo, hi
+
+
 def _validate_roi(roi, image: np.ndarray) -> tuple[int, int, int, int]:
     """Validate an ROI tuple against an image and return ``(rx, ry, rw, rh)``.
 
@@ -182,6 +194,46 @@ class Pose(NamedTuple):
     tvec_alt: np.ndarray | None = None
     reproj_err_alt: float | None = None
 
+    @property
+    def sd_tvec(self) -> np.ndarray | None:
+        """Standard deviation of each ``tvec`` component (same units), from ``cov``."""
+        if self.cov is None:
+            return None
+        return np.sqrt(np.clip(np.diag(self.cov)[3:], 0.0, None))
+
+    @property
+    def sd_t(self) -> float | None:
+        """One number for the position uncertainty: ``|sd_tvec|`` (same units as ``tvec``).
+
+        With the outer corners alone (4 points) the corner noise is estimated
+        from 2 degrees of freedom, so it varies a lot from frame to frame;
+        smooth it or combine it with ``cell_px`` / ``bit_errors``.
+        """
+        sd = self.sd_tvec
+        return None if sd is None else float(np.linalg.norm(sd))
+
+    @property
+    def sd_rot_deg(self) -> float | None:
+        """Rotation uncertainty in degrees: ``|sd(rvec)|``, from ``cov``."""
+        if self.cov is None:
+            return None
+        return float(np.degrees(np.linalg.norm(np.sqrt(np.clip(np.diag(self.cov)[:3], 0.0, None)))))
+
+
+class Lookalike(NamedTuple):
+    """A quad of the expected size that looks like the marker but is not read.
+
+    Returned by ``detect(..., expected_side_px=...)`` on frames with no
+    detection: enough to steer towards the marker before its cells read.
+    """
+
+    corners: np.ndarray  # float32 (4, 2), unrefined
+    centre: np.ndarray  # float32 (2,)
+    level: int  # the level whose expected size it has
+    border_errors: int  # border cells read white
+    bit_errors: int  # data cells off that level's code
+    contrast: float  # mean bright minus mean dark cell, grey levels
+
 
 @dataclass(repr=False)
 class DetectionResult:
@@ -210,6 +262,10 @@ class DetectionResult:
     cell_px: np.ndarray | None = None  # float32 (N,)
     contrast: np.ndarray | None = None  # float32 (N,)
     bit_errors: np.ndarray | None = None  # int32 (N,)
+    # detect(..., expected_side_px=...) only: quads of the expected size that
+    # look like the marker but are not read (frames with no detection), fewest
+    # border errors first; None without a size hint.
+    lookalikes: list[Lookalike] | None = None
 
     def __len__(self) -> int:
         return int(self.ids.shape[0])
@@ -338,8 +394,17 @@ class FractalDetector:
         roi: "tuple[int, int, int, int] | None" = None,
         all_instances: bool = False,
         prior: "DetectionResult | None" = None,
+        expected_side_px: "tuple[float, float] | None" = None,
     ) -> DetectionResult:
         """Detect the marker levels in ``image``.
+
+        ``expected_side_px=(lo, hi)``: the side of the outer level in pixels is
+        known to lie in this range (e.g. from a rangefinder: side = size * f /
+        height, with its error). Quads of a level's expected size are then
+        read with a looser tolerance (a few border cells, ``sz^2 / 10`` data
+        cells), the minimum contour drops to fit the expected size, and quads
+        of that size that still do not read come back in
+        ``result.lookalikes``.
 
         ``prior``: the last detection of this marker (e.g. the previous
         frame's). A quad that no reading decodes but that lies where one of
@@ -362,12 +427,15 @@ class FractalDetector:
             box: tuple[int, ...] = (rx, ry, rw, rh)
         else:
             box = (-1, -1, -1, -1)
+        hint = _validate_hint(expected_side_px)
         self._set_prior(prior, box)
+        if hint is not None:
+            self._d.set_hint(*hint)
         try:
             if with_inner_points:
                 full, (px, con, err) = self._d.detect_full(image, *box, multi_ok)
                 ids, corners, p2d, p3d, multi, drop, lv, inst, pinst = full
-                return DetectionResult(
+                res = DetectionResult(
                     ids,
                     corners,
                     p2d,
@@ -381,20 +449,39 @@ class FractalDetector:
                     con,
                     err,
                 )
-            ids, corners, multi, drop, inst, (px, con, err) = self._d.detect(image, *box, multi_ok)
+            else:
+                ids, corners, multi, drop, inst, (px, con, err) = self._d.detect(
+                    image, *box, multi_ok
+                )
+                res = DetectionResult(
+                    ids=ids,
+                    corners=corners,
+                    multiple_instances=multi,
+                    inconsistent_ids=drop,
+                    instances=inst if multi_ok else None,
+                    cell_px=px,
+                    contrast=con,
+                    bit_errors=err,
+                )
+            if hint is not None:
+                res.lookalikes = self._lookalikes(box)
         finally:
             if prior is not None:
                 self._d.set_prior(np.zeros(0, np.int32), np.zeros((0, 4, 2), np.float32))
-        return DetectionResult(
-            ids=ids,
-            corners=corners,
-            multiple_instances=multi,
-            inconsistent_ids=drop,
-            instances=inst if multi_ok else None,
-            cell_px=px,
-            contrast=con,
-            bit_errors=err,
-        )
+            if hint is not None:
+                self._d.set_hint(0.0, 0.0)
+        return res
+
+    def _lookalikes(self, box: "tuple[int, ...]") -> "list[Lookalike]":
+        ids, corners, be, bb, con = self._d.lookalikes(box[0], box[1])
+        out = [
+            Lookalike(
+                corners[k], corners[k].mean(0), int(ids[k]), int(be[k]), int(bb[k]), float(con[k])
+            )
+            for k in range(len(ids))
+        ]
+        out.sort(key=lambda q: (q.border_errors, q.bit_errors, -q.contrast))
+        return out
 
     def _set_prior(self, prior: "DetectionResult | None", box: "tuple[int, ...]") -> None:
         if prior is None:
@@ -635,6 +722,7 @@ __all__ = [
     "FractalDetector",
     "FractalTracker",
     "generate_fractal",
+    "Lookalike",
     "Pose",
     "QuadInfo",
     "PoseSmoother",

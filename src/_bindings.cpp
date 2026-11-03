@@ -303,6 +303,42 @@ struct FractalDetectorImpl {
                           ids_to_numpy(std::move(err)));
   }
 
+  // Size hint for the next detect / detect_full / diagnose calls: side range
+  // (lo, hi) of the outer level in full-image pixels, lo = hi = 0 off;
+  // border / div: the tolerance (wrong border cells, sz^2 / div data cells).
+  void set_hint(float lo, float hi, int border = 3, int div = 10) {
+    FastFractalDetector &d = *pool[0];
+    d.hint_lo_ = lo;
+    d.hint_hi_ = hi;
+    d.hint_border_ = border;
+    d.hint_div_ = div;
+  }
+
+  // Lookalikes of the last call with a size hint: (ids int32 (N,), corners
+  // float32 (N, 4, 2), border_errors int32, bit_errors int32, contrast
+  // float32), shifted by the ROI offset.
+  nb::tuple lookalikes(int rx = -1, int ry = -1) {
+    const auto &L = pool[0]->lookalikes_;
+    const size_t n = L.size();
+    const float ox = rx > 0 ? (float)rx : 0.f, oy = ry > 0 ? (float)ry : 0.f;
+    std::vector<int32_t> ids(n), be(n), bb(n);
+    std::vector<float> corners(n * 8), con(n);
+    for (size_t i = 0; i < n; i++) {
+      ids[i] = L[i].id;
+      be[i] = L[i].border_errors;
+      bb[i] = L[i].bit_errors;
+      con[i] = L[i].contrast;
+      for (int c = 0; c < 4; c++) {
+        corners[i * 8 + c * 2] = L[i].c[c].x + ox;
+        corners[i * 8 + c * 2 + 1] = L[i].c[c].y + oy;
+      }
+    }
+    return nb::make_tuple(
+        ids_to_numpy(std::move(ids)), corners_to_numpy(std::move(corners), n),
+        ids_to_numpy(std::move(be)), ids_to_numpy(std::move(bb)),
+        make_owned<float>(std::move(con), {n}));
+  }
+
   // Parallel batch detection. The detector is not thread-safe, so each worker
   // thread t uses its own pool[t] (built once, lazily grown to T).
   std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
@@ -770,6 +806,10 @@ NB_MODULE(_nanofractal, m) {
       .def("set_prior", &FractalDetectorImpl::set_prior, nb::arg("ids"),
            nb::arg("corners"), nb::arg("rx") = -1, nb::arg("ry") = -1)
       .def("set_capture", &FractalDetectorImpl::set_capture, nb::arg("on"))
+      .def("set_hint", &FractalDetectorImpl::set_hint, nb::arg("lo"),
+           nb::arg("hi"), nb::arg("border") = 3, nb::arg("div") = 10)
+      .def("lookalikes", &FractalDetectorImpl::lookalikes, nb::arg("rx") = -1,
+           nb::arg("ry") = -1)
       .def("captured", &FractalDetectorImpl::captured, nb::arg("rx") = -1,
            nb::arg("ry") = -1)
       .def("estimate_pose", &FractalDetectorImpl::estimate_pose,

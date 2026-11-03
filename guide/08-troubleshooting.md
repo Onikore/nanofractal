@@ -28,7 +28,8 @@ Work through these in order:
 10. **Found late on the approach?** With 2.5–3 px per cell and an
    overexposed print, `diagnose` shows the marker's square a few cells off
    for many frames before the first read: `FractalTracker(detector,
-   capture_frames=3)`. Also lower the exposure, or use a matte print — the
+   capture_frames=3)`, and, if the height is known,
+   `expected_side_px=(lo, hi)`. Also lower the exposure, or use a matte print — the
    white of a glossy sheet saturates and the black cells turn grey.
 11. **Very close?** Cells of 60 px and more are far larger than the automatic
    threshold block (11 px at 1280 wide); on a dark frame the contours then
@@ -83,7 +84,7 @@ listed; `n_not_quad` counts the ones that are not a convex quad.
 ## The pose jumps or is wrong
 
 - Check `reproj_err`: above ~2 px the correspondences or the intrinsics are
-  off. Gate on it — or better, weigh the pose by `Pose.cov`
+  off. Gate on it — or better, weigh the pose by `Pose.cov` (`sd_t`)
   (`estimate_pose(..., full=True)`) and the levels' `cell_px` / `bit_errors`.
 - `reproj_err_alt` close to `reproj_err` (`full=True`): the tilt is
   ambiguous (small, nearly frontal marker); pick the solution with an IMU or

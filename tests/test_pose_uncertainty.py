@@ -126,3 +126,21 @@ def test_fisheye_covariance_matches_scatter():
         covs.append(p.cov)
     ratio = np.sqrt(np.diag(np.cov(np.array(est).T)) / np.diag(np.mean(covs, axis=0)))
     assert np.all((ratio > 0.75) & (ratio < 1.35)), ratio
+
+
+def test_sd_properties():
+    det = nf.FractalDetector(CONFIG, marker_size=0.2)
+    ids, obj = _level_corners(det)
+    rv, tv = np.array([0.4, -0.3, 0.1]), np.array([0.05, -0.02, 0.9])
+    est, _, poses = _monte_carlo(det, ids, obj, rv, tv, n=60)
+    p = poses[0]
+    sd = np.sqrt(np.diag(p.cov))
+    np.testing.assert_allclose(p.sd_tvec, sd[3:])
+    assert p.sd_t == np.linalg.norm(sd[3:])
+    np.testing.assert_allclose(p.sd_rot_deg, np.degrees(np.linalg.norm(sd[:3])))
+    # sd_t predicts the scatter of the position
+    sd_t = np.mean([q.sd_t for q in poses])
+    scatter = np.linalg.norm(est[:, 3:].std(0))
+    assert 0.7 < scatter / sd_t < 1.4, (scatter, sd_t)
+    no_cov = p._replace(cov=None)
+    assert no_cov.sd_tvec is None and no_cov.sd_t is None and no_cov.sd_rot_deg is None

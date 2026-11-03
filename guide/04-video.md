@@ -114,6 +114,50 @@ readable marker, and 1200 synthetic frames of marker-like objects, not one
 candidate. While there is no track it costs 4–22 % of a `detect` on a
 cluttered frame (+0.06 ms at 640×480, +0.77 ms at 1920×1080, one core).
 
+### When the size is known (`expected_side_px`)
+
+A rangefinder or a barometer gives the height, and so the marker's side in
+the image: `side ≈ size · f / height` (metres, focal length in pixels).
+`detect(..., expected_side_px=(lo, hi))` (also `tracker.detect`) uses it:
+
+- quads of a level's expected size are read with a looser tolerance — up to
+  3 border cells and `sz² / 10` data cells off (14 of 144 for the outer level
+  of `FRACTAL_3L_6`, against 8 with `prior`);
+- the minimum contour drops to fit the expected size (a 28 px marker has a
+  perimeter under the default 120);
+- quads of that size that still do not read, but come within `sz² / 7` cells
+  (20 of 144), are returned in `res.lookalikes` — centre, corners, wrong
+  border and data cells, contrast — to steer towards the marker before its
+  cells read.
+
+Leave room for the height error and for tilt (the side shrinks by cos θ): ±30 %
+is a reasonable window.
+
+```python
+far = np.full((240, 320), 255, np.uint8)
+far[60:130, 100:170] = nf.generate_fractal("FRACTAL_3L_6", 70)   # 5 px/cell
+far[70:75, 110:160] ^= 255                 # ten cells of the outer grid read wrong
+print(det3.detect(far).ids.tolist())       # plain: nothing
+
+side = 0.18 * 1050 / 2.7                   # 0.18 m marker, f = 1050 px, 2.7 m: 70 px
+res = det3.detect(far, expected_side_px=(side / 1.3, side * 1.3))
+print(res.ids.tolist(), res.bit_errors.tolist())       # [0] [10]
+
+worse = far.copy()
+worse[75:80, 110:150] ^= 255               # eight more cells: 18 off
+res = det3.detect(worse, expected_side_px=(side / 1.3, side * 1.3))
+print(res.ids.tolist(), [(q.centre.round(), q.bit_errors) for q in res.lookalikes])
+assert len(res) == 0 and res.lookalikes[0].bit_errors == 18
+```
+
+Flight videos (8027 frames, the window ±30 % around the marker's size,
+tracker with `capture_frames=3`): 4780 frames with the marker against 4480,
+the first read 7–36 s earlier on five approaches. Where there is no marker
+(611 flight and synthetic frames, every window from 20 to 96 px) no
+detection and no lookalike; the closest quad of the expected size there is
+25+ cells off the code, the marker on the approach 9–24. Cost: +0.2–0.3 ms
+per frame on one core.
+
 ## A camera loop
 
 ```python

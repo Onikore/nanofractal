@@ -42,6 +42,20 @@ class Pose(NamedTuple):
     rvec_alt: npt.NDArray[np.float64] | None = ...
     tvec_alt: npt.NDArray[np.float64] | None = ...
     reproj_err_alt: float | None = ...
+    @property
+    def sd_tvec(self) -> npt.NDArray[np.float64] | None: ...
+    @property
+    def sd_t(self) -> float | None: ...
+    @property
+    def sd_rot_deg(self) -> float | None: ...
+
+class Lookalike(NamedTuple):
+    corners: npt.NDArray[np.float32]
+    centre: npt.NDArray[np.float32]
+    level: int
+    border_errors: int
+    bit_errors: int
+    contrast: float
 
 # ── DetectionResult ───────────────────────────────────────────────────────────
 @dataclass(repr=False)
@@ -58,6 +72,7 @@ class DetectionResult:
     cell_px: npt.NDArray[np.float32] | None = ...
     contrast: npt.NDArray[np.float32] | None = ...
     bit_errors: npt.NDArray[np.int32] | None = ...
+    lookalikes: list[Lookalike] | None = ...
 
     @property
     def n_instances(self) -> int: ...
@@ -111,6 +126,7 @@ class FractalDetector:
         roi: tuple[int, int, int, int] | None = ...,
         all_instances: bool = ...,
         prior: DetectionResult | None = ...,
+        expected_side_px: tuple[float, float] | None = ...,
     ) -> DetectionResult: ...
     def diagnose(
         self,
@@ -179,7 +195,10 @@ class FractalTracker:
     ) -> None: ...
     def reset(self) -> None: ...
     def detect(
-        self, image: npt.NDArray[np.uint8], with_inner_points: bool = ...
+        self,
+        image: npt.NDArray[np.uint8],
+        with_inner_points: bool = ...,
+        expected_side_px: tuple[float, float] | None = ...,
     ) -> DetectionResult: ...
 
 # ── PoseSmoother ─────────────────────────────────────────────────────────────
@@ -232,6 +251,7 @@ __all__ = [
     "Pose",
     "PoseSmoother",
     "QuadInfo",
+    "Lookalike",
     "generate_fractal",
     "refine_corners",
     "set_num_threads",

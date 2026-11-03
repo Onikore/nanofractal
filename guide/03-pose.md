@@ -84,6 +84,7 @@ print(p.method, p.tvec[2])   # "corners", the same distance as for the full page
 | `n_points`, `n_inliers` | correspondences before / after the outlier pass |
 | `reproj_err_rel` | `reproj_err` divided by the side in pixels of the largest detected level |
 | `cov` | 6×6 covariance of `(rvec, tvec)` (rad, metres), or `None` with fewer than 4 points |
+| `sd_tvec`, `sd_t`, `sd_rot_deg` | from `cov`: 1-σ of each `tvec` component, their norm (one number for the position), the rotation's in degrees |
 | `rvec_alt`, `tvec_alt`, `reproj_err_alt` | the other planar solution and its RMS error, or `None` |
 
 `reproj_err_rel` is the better quality gate when the marker's size in the
@@ -103,6 +104,14 @@ residuals, `σ² (JᵀJ)⁻¹` — e.g. `np.sqrt(p.cov[5, 5])` is the 1-σ uncer
 of the distance. On synthetic noise it matches the actual scatter of the pose
 within ±12 %. It describes the chosen solution only.
 
+For a single number per frame: `p.sd_t` is the position uncertainty
+(`|sd_tvec|`, metres), `p.sd_rot_deg` the rotation's. On average they match
+the scatter, but with the outer corners alone (4 points, the usual case far
+away) the noise is estimated from 2 degrees of freedom: `sd_t` then varies
+about ×5 from frame to frame (p10–p90 0.6–3.0 mm for a true 1.7 mm), against
+±13 % with every level in view — smooth it over a few frames, or combine it
+with `cell_px` and `bit_errors`, before deciding on it.
+
 A planar target has a second, mirrored pose that fits small or nearly frontal
 markers almost as well (the "flip"). `rvec_alt` / `tvec_alt` is that other
 solution; `reproj_err_alt / reproj_err` says how distinct they are: above ~5
@@ -112,6 +121,7 @@ and an outside cue (gravity from an IMU, the previous frame) has to decide.
 ```python
 if p is not None and p.rvec_alt is not None:
     print("distance ±", np.sqrt(p.cov[5, 5]), "flip ratio", p.reproj_err_alt / p.reproj_err)
+    print("position ±", p.sd_t, "m, rotation ±", p.sd_rot_deg, "deg")
 ```
 
 The correspondences are available if you prefer your own solver:

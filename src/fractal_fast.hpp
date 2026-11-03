@@ -30,6 +30,7 @@
 #include <cmath>
 #include <cstdint>
 #include <cstring>
+#include <map>
 #include <opencv2/core.hpp>
 #include <opencv2/imgproc.hpp>
 #include <type_traits>
@@ -1116,6 +1117,11 @@ public:
       : set_(config) {
     if (marker_size != -1.f)
       set_.convertToMeters(marker_size);
+    float outer = 0.f;
+    for (const auto &fm : set_.fractalMarkerCollection)
+      outer = std::max(outer, fm.second.getMarkerSize());
+    for (const auto &fm : set_.fractalMarkerCollection)
+      frac_[fm.first] = outer > 0.f ? fm.second.getMarkerSize() / outer : 1.f;
     for (auto &kv : set_.bits_ids) {
       Group g;
       g.n = (int)std::lround(std::sqrt((double)kv.first)) + 2;
@@ -1282,6 +1288,16 @@ private:
   // cornerSubPix call on the benchmark scenes.
   static constexpr int kRereadContrast = 40;
 
+  // A quad of the expected size with a near border that no reading accepts
+  // (size hint only): unrefined corners (frame coordinates), the level it
+  // was compared with, wrong border / data cells and the cell contrast.
+  struct Lookalike {
+    int id = -1;
+    cv::Point2f c[4];
+    int border_errors = 0, bit_errors = 0;
+    float contrast = 0.f;
+  };
+
   struct Candidate {
     int id;
     cv::Point2f c[4];
@@ -1321,12 +1337,16 @@ private:
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
     captured_.clear();
+    lookalikes_.clear();
     capturing_ = capture_ && prior_.empty();
+    hinting_ = hint_hi_ > 0.f;
     run_pass(out, scale, 0, false);
-    capturing_ = false;
+    capturing_ = hinting_ = false;
     second_pass_ = false;
-    if (!out.empty())
+    if (!out.empty()) {
       captured_.clear();
+      lookalikes_.clear();
+    }
     if (!out.empty() || !params.close_pass || !close_pass_enabled_)
       return;
     const float s2 =
@@ -1337,8 +1357,10 @@ private:
       return; // too small to hold a marker
     second_pass_ = true;
     run_pass(out, s2, w2, true);
-    if (!out.empty())
+    if (!out.empty()) {
       captured_.clear();
+      lookalikes_.clear();
+    }
   }
 
   // One detection pass on the frame scaled by `scale`, threshold block `win`
@@ -1374,6 +1396,8 @@ private:
       win++;
     int min_contour =
         (params.min_contour_size == -1) ? 120 : params.min_contour_size;
+    if (hinting_) // the expected outer level must not fall under it
+      min_contour = std::min(min_contour, std::max(16, int(3.2f * hint_lo_)));
     if (scale < 1.f)
       min_contour = std::max(4, int(min_contour * scale + 0.5f));
 
@@ -1396,8 +1420,10 @@ private:
         std::max(1, std::min(nc, serial ? 1 : 2 * cv::getNumThreads()));
     if ((int)workers_.size() < nchunks)
       workers_.resize(nchunks);
-    for (Worker &w : workers_)
+    for (Worker &w : workers_) {
       w.caught.clear();
+      w.looks.clear();
+    }
     if (nc > 0)
       cv::parallel_for_(
           cv::Range(0, nchunks),
@@ -1414,7 +1440,16 @@ private:
                 nslots_[i] = decode(w.approx, &slots_[(size_t)i * G]);
                 if (nslots_[i] == 0 && !prior_.empty())
                   nslots_[i] = prior_read(w.approx, &slots_[(size_t)i * G]);
-                else if (nslots_[i] == 0 && capturing_) {
+                if (nslots_[i] == 0 && hinting_) {
+                  Lookalike lk;
+                  const int r = tolerant_read(w.approx, &slots_[(size_t)i * G],
+                                              kHint, &lk);
+                  if (r > 0)
+                    nslots_[i] = r;
+                  else if (r < 0)
+                    w.looks.push_back(lk);
+                }
+                if (nslots_[i] == 0 && capturing_) {
                   Candidate cand;
                   if (prior_read(w.approx, &cand, true))
                     w.caught.push_back(cand);
@@ -1428,6 +1463,13 @@ private:
         cands_.push_back(slots_[(size_t)i * G + j]);
     if (capturing_)
       collect_captured(inv_scale);
+    if (hinting_)
+      for (const Worker &w : workers_)
+        for (Lookalike lk : w.looks) {
+          for (auto &p : lk.c)
+            p *= inv_scale;
+          lookalikes_.push_back(lk);
+        }
 
     // duplicates: sort by id and, within an id, largest perimeter first.
     // Quads decoded only by the second reading are sorted apart and merged
@@ -1752,9 +1794,23 @@ private:
   // code and no 12-cell one within 22; 8-cell quads (excluded) come within 6.
   // any = capture (set_capture): no prior, every level of 10+ cells is tried
   // wherever the quad is; the match is only a candidate (captured()).
+  // hint = size hint (set_hint): every level of 10+ cells whose expected side
+  // (the outer side range times the level's size) holds the quad's side is
+  // tried, with the looser tolerance hint_border_ / sz^2 / hint_div_; a quad
+  // that is not accepted but within sz^2 / kLookDiv data cells is listed in
+  // *look. Flight videos (FRACTAL_3L_6, 12x12 data cells): the marker on the
+  // approach reads 9-24 cells off; with no marker the closest quad of the
+  // expected size is 25+ cells off (synthetic marker-like objects 30+).
   static constexpr int kPriorMinCells = 10;
+  static constexpr int kLookDiv = 7;
+  enum ReadMode { kPrior = 0, kCapture, kHint };
   int prior_read(const std::vector<cv::Point> &quad, Candidate *out,
                  bool any = false) const {
+    return tolerant_read(quad, out, any ? kCapture : kPrior, nullptr);
+  }
+
+  int tolerant_read(const std::vector<cv::Point> &quad, Candidate *out,
+                    int mode, Lookalike *look) const {
     cv::Point2f mc[4];
     for (int j = 0; j < 4; j++)
       mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
@@ -1768,13 +1824,18 @@ private:
     const cv::Point2f ctr = (mc[0] + mc[1] + mc[2] + mc[3]) * (0.25f * inv);
     const float side = mean_side(mc) * inv;
     int ids[16], nid = 0;
-    if (any)
+    if (mode != kPrior)
       for (const Group &g : groups_)
-        for (const Code &cc : g.codes)
-          if (g.n >= kPriorMinCells && nid < 16)
+        for (const Code &cc : g.codes) {
+          if (g.n < kPriorMinCells || nid >= 16)
+            continue;
+          const float f = level_frac(cc.id);
+          if (mode == kCapture ||
+              (side >= hint_lo_ * f && side <= hint_hi_ * f))
             ids[nid++] = cc.id;
+        }
     static const std::vector<Detection> kNone;
-    for (const Detection &p : any ? kNone : prior_) {
+    for (const Detection &p : mode == kPrior ? prior_ : kNone) {
       const float ps = mean_side(p.corners);
       const cv::Point2f pc =
           (p.corners[0] + p.corners[1] + p.corners[2] + p.corners[3]) * 0.25f;
@@ -1784,11 +1845,14 @@ private:
     }
     if (nid == 0)
       return 0;
+    const int max_border = mode == kHint ? hint_border_ : 1;
     cv::Point2f rc[4];
     refine(proc_, mc, rc);
     const cv::Point2f unit[4] = {{0, 0}, {1, 0}, {1, 1}, {0, 1}};
     const cv::Mat Hm = cv::getPerspectiveTransform(unit, mc);
     int best = INT_MAX, best_id = -1, best_rot = 0;
+    int lk_border = INT_MAX, lk_bits = INT_MAX, lk_id = -1;
+    float lk_con = 0.f;
     for (int k = 0; k < nid; k++) {
       const Group *g = nullptr;
       const Code *code = nullptr;
@@ -1800,7 +1864,8 @@ private:
           }
       if (!code || g->n < kPriorMinCells)
         continue;
-      const int n = g->n, sz = n - 2, tol = sz * sz / 18;
+      const int n = g->n, sz = n - 2;
+      const int tol = sz * sz / (mode == kHint ? hint_div_ : 18);
       float val[2][18 * 18];
       double mean[2];
       uint8_t raw[18 * 18];
@@ -1822,8 +1887,10 @@ private:
           else
             inner[(r - 1) * sz + c - 1] = b ? 255 : 0;
         }
-        if (nhi == 0 || nhi == n * n || border > 1 ||
-            hi / nhi - lo / (n * n - nhi) < kRereadContrast)
+        if (nhi == 0 || nhi == n * n || border > max_border)
+          continue;
+        const float con = float(hi / nhi - lo / (n * n - nhi));
+        if (con < kRereadContrast)
           continue;
         for (int rot = 0; rot < 4; rot++) {
           int e = 0;
@@ -1834,6 +1901,13 @@ private:
             best_id = code->id;
             best_rot = rot;
           }
+          if (look && e <= sz * sz / kLookDiv &&
+              (border < lk_border || (border == lk_border && e < lk_bits))) {
+            lk_border = border;
+            lk_bits = e;
+            lk_id = code->id;
+            lk_con = con;
+          }
           for (int i = 0; i < sz; i++)
             for (int j = 0; j < sz; j++)
               tmp[i * sz + j] = inner[(sz - 1 - j) * sz + i];
@@ -1841,8 +1915,17 @@ private:
         }
       }
     }
-    if (best_id < 0)
+    if (best_id < 0) {
+      if (look && lk_id >= 0) {
+        look->id = lk_id;
+        look->border_errors = lk_border;
+        look->bit_errors = lk_bits;
+        look->contrast = lk_con;
+        std::copy(mc, mc + 4, look->c);
+        return -1; // a lookalike, not a detection
+      }
       return 0;
+    }
     std::rotate(mc, mc + 4 - best_rot, mc + 4);
     Candidate &cand = out[0];
     cand.id = best_id;
@@ -1850,6 +1933,12 @@ private:
     cand.errors = best;
     std::copy(mc, mc + 4, cand.c);
     return 1;
+  }
+
+  // Side of level id as a fraction of the outer level's.
+  float level_frac(int id) const {
+    auto it = frac_.find(id);
+    return it == frac_.end() ? 1.f : it->second;
   }
 
   // Reading quality of a final detection on the full-resolution frame.
@@ -2478,6 +2567,14 @@ public:
   // where nothing is detected; nothing is added to the detection itself.
   bool capture_ = false;
   std::vector<Detection> captured_;
+  // Size hint (detect(..., expected_side_px=(lo, hi))): side range of the
+  // outer level in frame pixels, 0 = off. Quads of a level's expected size
+  // are read with up to hint_border_ wrong border cells and sz^2 / hint_div_
+  // wrong data cells; near misses go to lookalikes_ (frames with no
+  // detection only). min_contour_size drops to fit the expected outer level.
+  float hint_lo_ = 0.f, hint_hi_ = 0.f;
+  int hint_border_ = 3, hint_div_ = 10;
+  std::vector<Lookalike> lookalikes_;
 
 private:
   std::vector<int> dropped_;      // levels removed by check_levels()
@@ -2491,8 +2588,10 @@ private:
     ApproxPolyDP dp;
     std::vector<cv::Point> approx;
     std::vector<Candidate> caught; // capture candidates of this chunk
+    std::vector<Lookalike> looks;  // size-hint near misses of this chunk
   };
-  bool capturing_ = false;
+  bool capturing_ = false, hinting_ = false;
+  std::map<int, float> frac_; // level side / outer side
 
   void collect_captured(float inv_scale) {
     for (const Worker &w : workers_)

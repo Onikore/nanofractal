@@ -28,12 +28,19 @@ FractalDetector(config, marker_size=-1.0, params=None)
 - `prior`: a `DetectionResult` of this marker from a moment ago (full-image
   coordinates); quads where its levels were are read with a few wrong cells
   allowed (grids of 10+ cells). Used for this call only.
+- `expected_side_px`: `(lo, hi)`, the outer level's side in pixels (from the
+  height); quads of a level's expected size are read with a looser tolerance,
+  and `res.lookalikes` lists `Lookalike(corners, centre, level,
+  border_errors, bit_errors, contrast)` for those that still do not read
+  (`None` without the hint). See
+  [Video](04-video.md#when-the-size-is-known-expected_side_px).
 - `num_threads=0`: all cores.
 - `estimate_pose`: `camera_matrix` 3×3, `dist_coeffs` of length 4/5/8/12/14
   (exactly 4 with `fisheye=True`); uses inner points when the result has ≥ 4,
   else the outer corners of every detected level; one outlier pass with ≥ 8
   points; `full=True` returns `Pose(rvec, tvec, reproj_err, method, n_points,
-  n_inliers, reproj_err_rel, cov, rvec_alt, tvec_alt, reproj_err_alt)`.
+  n_inliers, reproj_err_rel, cov, rvec_alt, tvec_alt, reproj_err_alt)`;
+  properties `sd_tvec`, `sd_t`, `sd_rot_deg` from `cov`.
 - `draw` needs a writable contiguous image when `inplace=True`; `axis_length`
   defaults to half `marker_size`.
 
@@ -57,7 +64,7 @@ level's code that stays in place for `N - 1` frames is read with it as
 
 | member | |
 |---|---|
-| `detect(image, with_inner_points=False)` | like `detector.detect`, searching near the previous result |
+| `detect(image, with_inner_points=False, expected_side_px=None)` | like `detector.detect`, searching near the previous result |
 | `reset()` | forget the previous result |
 | `full_frame_detections` | how many frames needed a whole-frame search |
 
