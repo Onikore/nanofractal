@@ -19,8 +19,8 @@ tracker to the marker size and adds NEON code for aarch64. 0.7.1 finds
 markers seen from very close on dark frames (a second threshold pass);
 0.7.2 reports the reading quality of every level and keeps a marker that
 flickers at the edge of range (`prior` / `FractalTracker(use_prior=True)`).
-Next (in `main`): `FractalTracker(capture_frames=3)` picks up a marker that
-is in view but never read yet, once it holds its place for a few frames.
+0.7.3 picks up a marker that is in view but never read yet, once it holds
+its place for a few frames (`FractalTracker(capture_frames=3)`).
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most

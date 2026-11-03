@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.3] - 2026-11-03
+
 ### Added
 - `FractalTracker(..., capture_frames=N)` (0 = off): picks up a marker that is
   in view but not read yet. While there is no track, quads within the
@@ -44,6 +46,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   two builds in alternating rounds. `ROADMAP.md` rules mention the gate.
   `examples/README.md`: plain `python` commands (the ROS note moved to a
   pointer to `DEV.md`) and a pointer to video tracking with `use_prior`.
+- Capture: `guide/04` section with a runnable example, `guide/05` decision
+  row, `guide/07` API, `guide/08` (found late on the approach; overexposed
+  prints), README. `ROADMAP.md` records the R21 and R23 acceptance on the
+  flight videos of 28.10 (R23: 3757 -> 4285 frames with the marker; R21: 52
+  more frames at 0.12-0.5 m) and R24; `RPI_TEST_PLAN.md` closes R23 and adds
+  R24 (`--capture 3`).
 
 ## [0.7.2] - 2026-11-02
 
