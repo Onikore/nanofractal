@@ -17,6 +17,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `ROADMAP.md`: the upstream report on `getSubpixelValue` is not sent;
   capturing right after a track is lost was measured on the flight videos
   (no gain: 4480 frames either way) and is not taken.
+- `ROADMAP.md`: threshold block, `adaptive_c` and upscaling measured on the
+  flight videos (8027 frames, tracker with `capture_frames=3`): no block size
+  beats the automatic one, `adaptive_c = 3` gives +0.8 % but loses frames
+  under shadow on the synthetic set, upscaling x1.5 / x2 loses 90 / 123
+  frames — all kept as they are.
 
 ## [0.7.3] - 2026-11-03
 
