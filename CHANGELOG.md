@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.5] - 2026-11-03
+
 ### Changed
 - Reading with a size hint (`expected_side_px`) accepts a cell contrast of
   30 grey levels instead of 40. Flight videos (8027 frames): 4780 -> 4818

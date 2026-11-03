@@ -26,7 +26,9 @@ flickers at the edge of range (`prior` / `FractalTracker(use_prior=True)`).
 its place for a few frames (`FractalTracker(capture_frames=3)`). 0.7.4 reads
 a far marker with a looser tolerance when its size is known from the height
 (`expected_side_px`), reports lookalikes, and gives one number for the pose
-uncertainty (`Pose.sd_t`).
+uncertainty (`Pose.sd_t`). 0.7.5 reads overexposed far markers a little
+better with the size hint and comes with a documentation site and a landing
+recipe.
 
 **📖 [User guide](https://onikore.github.io/nanofractal/)** (also in
 [`guide/`](https://github.com/Onikore/nanofractal/tree/main/guide)) —
