@@ -28,7 +28,9 @@ a far marker with a looser tolerance when its size is known from the height
 (`expected_side_px`), reports lookalikes, and gives one number for the pose
 uncertainty (`Pose.sd_t`). 0.7.5 reads overexposed far markers a little
 better with the size hint and comes with a documentation site and a landing
-recipe.
+recipe. 0.7.6 reads a quad a third way when a few cells are off (edge-fitted
+corners, sharpened cells), refines corners with a window that follows the
+marker's size, and ships one stable-ABI wheel for Python 3.12+.
 
 **📖 [User guide](https://onikore.github.io/nanofractal/)** (also in
 [`guide/`](https://github.com/Onikore/nanofractal/tree/main/guide)) —

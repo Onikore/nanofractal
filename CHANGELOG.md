@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.6] - 2026-11-03
+
 ### Changed
 - Outer corners are refined with a window that follows the size of each
   level (`subpix_win_size = -1`, the default: side / 20 px, from 2 to 9)
