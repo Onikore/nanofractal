@@ -283,6 +283,26 @@ struct FractalDetectorImpl {
     }
   }
 
+  // Capture candidates (FractalTracker(capture_frames=...)): with capture on
+  // and no prior, detect calls that find nothing list the quads within the
+  // prior tolerance of a level's code. captured() returns those of the last
+  // call: (ids int32 (N,), corners float32 (N, 4, 2), bit_errors int32 (N,)),
+  // shifted by the ROI offset.
+  void set_capture(bool on) { pool[0]->capture_ = on; }
+
+  nb::tuple captured(int rx = -1, int ry = -1) {
+    const std::vector<Detection> &c = pool[0]->captured_;
+    const float ox = rx > 0 ? (float)rx : 0.f, oy = ry > 0 ? (float)ry : 0.f;
+    std::vector<int32_t> ids, err(c.size());
+    std::vector<float> corners;
+    fill(c, ids, corners, ox, oy);
+    for (size_t i = 0; i < c.size(); i++)
+      err[i] = c[i].bit_errors;
+    return nb::make_tuple(ids_to_numpy(std::move(ids)),
+                          corners_to_numpy(std::move(corners), c.size()),
+                          ids_to_numpy(std::move(err)));
+  }
+
   // Parallel batch detection. The detector is not thread-safe, so each worker
   // thread t uses its own pool[t] (built once, lazily grown to T).
   std::vector<nb::object> detect_batch(std::vector<RawArray> imgs,
@@ -749,6 +769,9 @@ NB_MODULE(_nanofractal, m) {
            nb::arg("ry") = -1, nb::arg("rw") = -1, nb::arg("rh") = -1)
       .def("set_prior", &FractalDetectorImpl::set_prior, nb::arg("ids"),
            nb::arg("corners"), nb::arg("rx") = -1, nb::arg("ry") = -1)
+      .def("set_capture", &FractalDetectorImpl::set_capture, nb::arg("on"))
+      .def("captured", &FractalDetectorImpl::captured, nb::arg("rx") = -1,
+           nb::arg("ry") = -1)
       .def("estimate_pose", &FractalDetectorImpl::estimate_pose,
            nb::arg("points_2d"), nb::arg("points_3d"), nb::arg("ids"),
            nb::arg("corners"), nb::arg("camera_matrix"), nb::arg("dist_coeffs"),

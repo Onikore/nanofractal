@@ -19,6 +19,8 @@ tracker to the marker size and adds NEON code for aarch64. 0.7.1 finds
 markers seen from very close on dark frames (a second threshold pass);
 0.7.2 reports the reading quality of every level and keeps a marker that
 flickers at the edge of range (`prior` / `FractalTracker(use_prior=True)`).
+Next (in `main`): `FractalTracker(capture_frames=3)` picks up a marker that
+is in view but never read yet, once it holds its place for a few frames.
 
 **📖 [User guide](https://github.com/Onikore/nanofractal/tree/main/guide)** —
 markers and printing, detection, pose, video, **how to use it most
@@ -205,6 +207,10 @@ for frame in frames:
 - `detect(image, prior=last_result)` — a level the plain reading misses by a
   few cells where it was a moment ago is kept and marked by `bit_errors > 0`
   (outer levels only; flight video: 10 more frames of 203).
+- `FractalTracker(det, capture_frames=3)` — a quad within the same
+  tolerance of a level's code that stays in place for 2 frames is read with
+  it as prior in the 3rd (flight videos: the marker read 8–39 s earlier on
+  the approach; no candidate on 2400 frames without it).
 - `res.cell_px`, `res.contrast`, `res.bit_errors` — reading quality of every
   level, to weigh a detection instead of a yes/no.
 - `diagnose(image)` — every candidate quad with the reason it was kept or

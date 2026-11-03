@@ -42,14 +42,18 @@ Attributes: `config`, `marker_size`, `params`.
 ## FractalTracker
 
 ```text
-FractalTracker(detector, margin=0.25, pad=16, auto_scale=False, scale_target_px=400, use_prior=False, prior_max_age=5)
+FractalTracker(detector, margin=0.25, pad=16, auto_scale=False, scale_target_px=400, use_prior=False, prior_max_age=5, capture_frames=0)
 ```
 
 `auto_scale=True` shrinks the searched region (`detection_scale`, 1 down to
 0.35) so the largest level of the previous frame is about `scale_target_px`
 wide; only when the detector's own `detection_scale` is 1. `use_prior=True`
 passes the last non-empty result (at most `prior_max_age` frames old) as
-`prior` to `detect`.
+`prior` to `detect`. `capture_frames=N` (0 = off, else ≥ 2; implies
+`use_prior`): while there is no track, a quad within that tolerance of a
+level's code that stays in place for `N - 1` frames is read with it as
+`prior` in the next one, see
+[Video](04-video.md#picking-up-a-marker-before-it-is-read-capture_frames).
 
 | member | |
 |---|---|

@@ -91,7 +91,8 @@ quad (wrong border cells, wrong bits, contrast, side); with `--calib`
 (npz with `K`, `dist`) also the pose, its standard deviations from
 `Pose.cov` and the error of the other planar solution; the reading quality
 (`cell_px`, `contrast`, `bit_errors`) of the largest level. `--prior` reads
-the folder as a video, passing the last result as `prior`. Used by
+the folder as a video, passing the last result as `prior`; `--capture N`
+runs `FractalTracker(capture_frames=N)` over it. Used by
 `RPI_TEST_PLAN.md`.
 
 ```

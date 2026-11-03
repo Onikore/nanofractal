@@ -85,6 +85,35 @@ With your own loop, pass the last non-empty result:
 `det.detect(frame, prior=last)`. Only grids of 10+ cells are read this way
 (the outer levels); small inner codes are too close to random patterns.
 
+### Picking up a marker before it is read (`capture_frames`)
+
+On the way down, the marker is often in view long before it is first read:
+2.5–3 px per cell, overexposed, a few cells off. There is no prior yet, so
+`use_prior` cannot help. `capture_frames=N` lists, on frames where nothing
+is detected, the quads that come as close to a level's code as a prior
+allows; when such a candidate of the same level stays in place for `N - 1`
+frames in a row, the next frame reads it with the candidate as prior. The
+first detection is then the `N`-th frame. It implies `use_prior`.
+
+```python
+small = np.full((240, 320), 255, np.uint8)
+small[60:130, 100:170] = nf.generate_fractal("FRACTAL_3L_6", 70)  # 5 px/cell
+small[70:75, 115:120] ^= 255               # outer grid cell (2, 3)
+small[70:75, 125:130] ^= 255               # outer grid cell (2, 5)
+print(det3.detect(small).ids.tolist())     # plain: nothing
+
+tracker = nf.FractalTracker(det3, capture_frames=3)
+got = [tracker.detect(small).ids.tolist() for _ in range(4)]
+print(got)                                 # [[], [], [0], [0]]
+assert got == [[], [], [0], [0]]
+```
+
+Flight videos (3–4 m, an overexposed print): the marker was read 8–39 s
+earlier than with `use_prior` alone; in 1242 frames of a flight with no
+readable marker, and 1200 synthetic frames of marker-like objects, not one
+candidate. While there is no track it costs 4–22 % of a `detect` on a
+cluttered frame (+0.06 ms at 640×480, +0.77 ms at 1920×1080, one core).
+
 ## A camera loop
 
 ```python

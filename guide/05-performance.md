@@ -11,6 +11,7 @@ per frame. Measure your own machine with the commands at the end.
 | live video, one camera | `FractalTracker(detector)`, default threads | searches near the last detection: ~2× at 4K; all cores inside each frame |
 | live 4K video, marker not tiny | `FractalTracker(detector, auto_scale=True)` | also shrinks the region from the last marker size: ×3.9 (all cores) to ×5.7 (1 core) at 4K, same corners |
 | marker near the edge of range flickers | `FractalTracker(detector, use_prior=True)` | keeps a level read a moment ago; ~0.06 ms, nothing without a previous result |
+| marker in view on the approach but never read | `FractalTracker(detector, capture_frames=3)` | picks it up once it holds its place; +4–22 % per frame while there is no track (+0.06 ms at 640×480, +0.77 ms at 1080p, one core), nothing once tracking |
 | every frame has a marker or none matters, and microseconds count | `params.close_pass = False` | saves the second threshold pass on empty frames (0.25–0.5 ms on one core at 720p–1080p); loses markers seen from very close on dark frames |
 | 4K (or larger) frames, marker not tiny | `params.detection_scale = 0.5` | threshold/contours on a quarter of the pixels; corners still refined at full resolution |
 | several cameras / streams at once | `nf.set_num_threads(1)`, one detector (or tracker) per stream | streams run in parallel instead of competing for cores |

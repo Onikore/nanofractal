@@ -25,7 +25,12 @@ Work through these in order:
 9. **Flickers at the edge of range?** Read in one frame, not in the next:
    `FractalTracker(detector, use_prior=True)` or `detect(frame,
    prior=last)` keeps it; those levels report `bit_errors > 0`.
-10. **Very close?** Cells of 60 px and more are far larger than the automatic
+10. **Found late on the approach?** With 2.5–3 px per cell and an
+   overexposed print, `diagnose` shows the marker's square a few cells off
+   for many frames before the first read: `FractalTracker(detector,
+   capture_frames=3)`. Also lower the exposure, or use a matte print — the
+   white of a glossy sheet saturates and the black cells turn grey.
+11. **Very close?** Cells of 60 px and more are far larger than the automatic
    threshold block (11 px at 1280 wide); on a dark frame the contours then
    fall apart. `params.close_pass` (on by default) retries such frames on a
    shrunken copy; if it is off, or the frame is huge, set

@@ -9,7 +9,9 @@ pose, its standard deviations from ``Pose.cov`` and the error of the other
 planar solution. Every row also has the reading quality of the largest level
 found (``cell_px``, ``contrast``, ``bit_errors``). ``--prior`` treats the
 folder as a video (files in name order) and passes the last non-empty result
-as ``prior``, like ``FractalTracker(use_prior=True)``.
+as ``prior``, like ``FractalTracker(use_prior=True)``; ``--capture N`` runs a
+``FractalTracker(capture_frames=N)`` instead (picks up the marker before it is
+read; implies ``--prior``).
 
     python benchmarks/frames_report.py frames/ --config FRACTAL_3L_6 \\
         --size 0.18 --calib calib.npz --csv report.csv
@@ -62,6 +64,9 @@ def main():
     ap.add_argument(
         "--prior", action="store_true", help="frames are a video: read with the last result"
     )
+    ap.add_argument(
+        "--capture", type=int, default=0, help="video: FractalTracker(capture_frames=N)"
+    )
     ap.add_argument("--csv", default="report.csv")
     args = ap.parse_args()
 
@@ -108,6 +113,7 @@ def main():
         "bit_errors",
     ]
     det.detect(np.zeros((64, 64), np.uint8))  # warm-up: first call allocates
+    tracker = nf.FractalTracker(det, capture_frames=args.capture) if args.capture else None
     n_any = n_outer = n_drop = n_multi = n_prior = 0
     last = None
     with open(args.csv, "w", newline="") as f:
@@ -119,7 +125,10 @@ def main():
                 print(f"skip (unreadable): {p}")
                 continue
             t0 = time.perf_counter()
-            res = det.detect(img, with_inner_points=args.inner, prior=last)
+            if tracker is not None:
+                res = tracker.detect(img, with_inner_points=args.inner)
+            else:
+                res = det.detect(img, with_inner_points=args.inner, prior=last)
             if args.prior and len(res):
                 last = res
             ms = (time.perf_counter() - t0) * 1e3

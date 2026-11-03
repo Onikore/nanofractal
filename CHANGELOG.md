@@ -8,6 +8,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `FractalTracker(..., capture_frames=N)` (0 = off): picks up a marker that is
+  in view but not read yet. While there is no track, quads within the
+  `prior` tolerance of a level's code (grids of 10+ cells) are candidates;
+  one of the same level that stays in place (centre within a side, size
+  within x1.5) for `N - 1` frames is read with it as `prior` in the next
+  frame. Implies `use_prior`. Flight videos (autolanding-pi, 28.10, 8027
+  frames): with `N = 3` the marker is first read 2-39 s earlier on four
+  approaches (4292 -> 4480 frames with the marker); no candidate in 1242
+  flight frames without a readable marker nor in 1200 synthetic frames of
+  marker-like objects (all four configurations); 300 static scenes held for
+  4 frames give no detection. Plain `detect` is bit-identical to 0.7.2. Cost
+  while there is no track (cluttered frame, one core): +0.06 ms at 640x480,
+  +0.13 ms at 1280x720, +0.77 ms at 1920x1080.
+- `benchmarks/frames_report.py --capture N`.
+- `.gitignore`: `videos/` (flight videos stay local).
 - CI speed gate (`.github/workflows/bench.yml`): the base commit and the new
   one are built with the same OpenCV and timed on one core in three
   alternating rounds; a geometric-mean slowdown above x1.10 or one cell above

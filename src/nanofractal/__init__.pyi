@@ -161,6 +161,7 @@ class FractalTracker:
     scale_target_px: float
     use_prior: bool
     prior_max_age: int
+    capture_frames: int
 
     def __init__(
         self,
@@ -171,6 +172,7 @@ class FractalTracker:
         scale_target_px: float = ...,
         use_prior: bool = ...,
         prior_max_age: int = ...,
+        capture_frames: int = ...,
     ) -> None: ...
     def reset(self) -> None: ...
     def detect(

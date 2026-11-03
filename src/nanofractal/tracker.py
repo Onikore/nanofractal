@@ -62,6 +62,17 @@ class FractalTracker:
     kept (``bit_errors > 0``). Flight video, ~2 m: 3 more frames of 203 with
     the marker, 7 more with the outer level; no detection on 600 frames of
     marker-like objects.
+
+    ``capture_frames=N`` (0 = off) picks up a marker before it is ever read:
+    while there is no track, a quad that comes as close to a level's code as
+    ``prior`` allows (outer levels, a few wrong cells) is a candidate, and
+    when candidates of the same level sit in the same place for ``N - 1``
+    frames in a row, the next frame reads that place with it as ``prior`` —
+    so the first detection is the ``N``-th frame. It implies ``use_prior``
+    (a marker picked up this way is rarely read without it). Flight videos (3-4 m,
+    2.5-3 px per cell, an overexposed print): the marker is read 8-39 s
+    earlier with ``N = 3``; no such candidate in 1242 frames of a flight with
+    no readable marker.
     """
 
     def __init__(
@@ -73,9 +84,12 @@ class FractalTracker:
         scale_target_px: float = 400.0,
         use_prior: bool = False,
         prior_max_age: int = 5,
+        capture_frames: int = 0,
     ) -> None:
         if margin < 0 or pad < 0:
             raise ValueError("margin and pad must be >= 0")
+        if capture_frames < 0 or capture_frames == 1:
+            raise ValueError("capture_frames must be 0 (off) or >= 2")
         if scale_target_px <= 0:
             raise ValueError("scale_target_px must be > 0")
         self.detector = detector
@@ -85,6 +99,9 @@ class FractalTracker:
         self.scale_target_px = float(scale_target_px)
         self.use_prior = bool(use_prior)
         self.prior_max_age = int(prior_max_age)
+        self.capture_frames = int(capture_frames)
+        self._cand: DetectionResult | None = None  # last capture candidate
+        self._cand_n = 0  # frames in a row it held its place
         self._last: DetectionResult | None = None  # last non-empty result
         self._last_age = 0
         self._prev: DetectionResult | None = None
@@ -96,6 +113,7 @@ class FractalTracker:
         self._prev = None
         self._prev_scale = 1.0
         self._last = None
+        self._cand, self._cand_n = None, 0
 
     def _scale(self) -> float:
         """detection_scale for the next region (auto_scale), 1 = none."""
@@ -124,13 +142,48 @@ class FractalTracker:
             return None  # hardly smaller than the frame: not worth it
         return rx, ry, rx1 - rx, ry1 - ry
 
+    def _follow_candidate(self, res: DetectionResult | None) -> None:
+        """Keep the capture candidate that holds its place (see capture_frames)."""
+        if res is None or len(res):
+            self._cand, self._cand_n = None, 0
+            return
+        from . import DetectionResult
+
+        ids, corners, _ = self.detector._d.captured()
+        keep = None
+        if self._cand is not None:
+            pc = self._cand.corners[0].astype(np.float64)
+            ps = float(np.linalg.norm(pc - np.roll(pc, 1, axis=0), axis=1).mean())
+            for k in range(len(ids)):
+                c = corners[k].astype(np.float64)
+                side = float(np.linalg.norm(c - np.roll(c, 1, axis=0), axis=1).mean())
+                if (
+                    ids[k] == self._cand.ids[0]
+                    and np.linalg.norm(c.mean(0) - pc.mean(0)) < ps
+                    and ps / 1.5 < side < ps * 1.5
+                ):
+                    keep = k
+                    break
+        if keep is not None:
+            self._cand_n += 1
+        elif len(ids):
+            keep, self._cand_n = 0, 1
+        else:
+            self._cand, self._cand_n = None, 0
+            return
+        self._cand = DetectionResult(ids=ids[keep : keep + 1], corners=corners[keep : keep + 1])
+
     def detect(self, image: np.ndarray, with_inner_points: bool = False) -> DetectionResult:
         det = self.detector
         prev = self._prev
         roi = self._roi(image.shape)
         prior = None
-        if self.use_prior and self._last is not None and self._last_age <= self.prior_max_age:
+        use_prior = self.use_prior or self.capture_frames > 0
+        if use_prior and self._last is not None and self._last_age <= self.prior_max_age:
             prior = self._last
+        capture = self.capture_frames > 0 and prior is None and prev is None
+        if capture and self._cand is not None and self._cand_n >= self.capture_frames - 1:
+            prior, capture = self._cand, False  # read the candidate's place
         res = None
         scale = 1.0
         if roi is not None and prev is not None:
@@ -157,7 +210,14 @@ class FractalTracker:
         if res is None:
             self.full_frame_detections += 1
             scale = 1.0
-            res = det.detect(image, with_inner_points=with_inner_points, prior=prior)
+            if capture:
+                det._d.set_capture(True)
+            try:
+                res = det.detect(image, with_inner_points=with_inner_points, prior=prior)
+            finally:
+                if capture:
+                    det._d.set_capture(False)
+        self._follow_candidate(res if capture else None)
         self._prev = res if len(res) else None
         if len(res):
             self._last, self._last_age = res, 1

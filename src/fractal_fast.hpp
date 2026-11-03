@@ -1320,8 +1320,13 @@ private:
     float scale = params.detection_scale;
     if (!(scale > 0.f && scale < 1.f))
       scale = 1.f;
+    captured_.clear();
+    capturing_ = capture_ && prior_.empty();
     run_pass(out, scale, 0, false);
+    capturing_ = false;
     second_pass_ = false;
+    if (!out.empty())
+      captured_.clear();
     if (!out.empty() || !params.close_pass || !close_pass_enabled_)
       return;
     const float s2 =
@@ -1332,6 +1337,8 @@ private:
       return; // too small to hold a marker
     second_pass_ = true;
     run_pass(out, s2, w2, true);
+    if (!out.empty())
+      captured_.clear();
   }
 
   // One detection pass on the frame scaled by `scale`, threshold block `win`
@@ -1389,6 +1396,8 @@ private:
         std::max(1, std::min(nc, serial ? 1 : 2 * cv::getNumThreads()));
     if ((int)workers_.size() < nchunks)
       workers_.resize(nchunks);
+    for (Worker &w : workers_)
+      w.caught.clear();
     if (nc > 0)
       cv::parallel_for_(
           cv::Range(0, nchunks),
@@ -1405,6 +1414,11 @@ private:
                 nslots_[i] = decode(w.approx, &slots_[(size_t)i * G]);
                 if (nslots_[i] == 0 && !prior_.empty())
                   nslots_[i] = prior_read(w.approx, &slots_[(size_t)i * G]);
+                else if (nslots_[i] == 0 && capturing_) {
+                  Candidate cand;
+                  if (prior_read(w.approx, &cand, true))
+                    w.caught.push_back(cand);
+                }
               }
             }
           },
@@ -1412,6 +1426,8 @@ private:
     for (int i = 0; i < nc; i++)
       for (int j = 0; j < nslots_[i]; j++)
         cands_.push_back(slots_[(size_t)i * G + j]);
+    if (capturing_)
+      collect_captured(inv_scale);
 
     // duplicates: sort by id and, within an id, largest perimeter first.
     // Quads decoded only by the second reading are sorted apart and merged
@@ -1734,8 +1750,11 @@ private:
   // of 10+ cells and clear contrast. Measured: 600 frames of marker-like
   // objects hold no 14-cell quad within 8 wrong cells of a FRACTAL_3L_6
   // code and no 12-cell one within 22; 8-cell quads (excluded) come within 6.
+  // any = capture (set_capture): no prior, every level of 10+ cells is tried
+  // wherever the quad is; the match is only a candidate (captured()).
   static constexpr int kPriorMinCells = 10;
-  int prior_read(const std::vector<cv::Point> &quad, Candidate *out) const {
+  int prior_read(const std::vector<cv::Point> &quad, Candidate *out,
+                 bool any = false) const {
     cv::Point2f mc[4];
     for (int j = 0; j < 4; j++)
       mc[j] = cv::Point2f((float)quad[j].x, (float)quad[j].y);
@@ -1749,7 +1768,13 @@ private:
     const cv::Point2f ctr = (mc[0] + mc[1] + mc[2] + mc[3]) * (0.25f * inv);
     const float side = mean_side(mc) * inv;
     int ids[16], nid = 0;
-    for (const Detection &p : prior_) {
+    if (any)
+      for (const Group &g : groups_)
+        for (const Code &cc : g.codes)
+          if (g.n >= kPriorMinCells && nid < 16)
+            ids[nid++] = cc.id;
+    static const std::vector<Detection> kNone;
+    for (const Detection &p : any ? kNone : prior_) {
       const float ps = mean_side(p.corners);
       const cv::Point2f pc =
           (p.corners[0] + p.corners[1] + p.corners[2] + p.corners[3]) * 0.25f;
@@ -2446,6 +2471,13 @@ public:
   // Levels of the previous detection (frame coordinates) for prior_read();
   // empty = off. Kept until changed.
   std::vector<Detection> prior_;
+  // Capture (FractalTracker(capture_frames=...)): with no prior, quads that
+  // no reading decodes but that come as close to a level's code as
+  // prior_read allows are listed in captured_ (frame coordinates, unrefined
+  // corners, bit_errors = wrong cells), fewest errors first. Only on frames
+  // where nothing is detected; nothing is added to the detection itself.
+  bool capture_ = false;
+  std::vector<Detection> captured_;
 
 private:
   std::vector<int> dropped_;      // levels removed by check_levels()
@@ -2458,7 +2490,32 @@ private:
   struct Worker {
     ApproxPolyDP dp;
     std::vector<cv::Point> approx;
+    std::vector<Candidate> caught; // capture candidates of this chunk
   };
+  bool capturing_ = false;
+
+  void collect_captured(float inv_scale) {
+    for (const Worker &w : workers_)
+      for (const Candidate &c : w.caught) {
+        Detection d;
+        d.id = c.id;
+        d.bit_errors = c.errors;
+        for (int k = 0; k < 4; k++)
+          d.corners[k] = c.c[k] * inv_scale;
+        captured_.push_back(d);
+      }
+    // independent of how the contours were split between threads
+    std::sort(captured_.begin(), captured_.end(),
+              [](const Detection &a, const Detection &b) {
+                if (a.bit_errors != b.bit_errors)
+                  return a.bit_errors < b.bit_errors;
+                const float pa = perimeter(a.corners),
+                            pb = perimeter(b.corners);
+                if (pa != pb)
+                  return pa > pb;
+                return a.corners[0].x < b.corners[0].x;
+              });
+  }
   std::vector<Worker> workers_;
   std::vector<std::pair<const cv::Point *, int>> conts_;
   std::vector<Candidate> slots_;
