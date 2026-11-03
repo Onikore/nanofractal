@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   pre-commit downloads cached, lint no longer gates the other jobs.
   `pytest-xdist` joins the `test` extra. A cache of the apt packages was
   tried and dropped: restored files miss the update-alternatives links.
+- Wheels: one stable-ABI (`abi3`) wheel per platform for Python 3.12-3.14
+  instead of three (nanobind `STABLE_ABI`, `wheel.py-api = "cp312"`);
+  3.9-3.11 keep their own. Measured: per-call overhead 12.5-12.8 us either
+  way, `fractal_bench` x1.001 (geometric mean, alternating rounds), results
+  bit-identical. 21 files per release instead of 31, fewer builds in
+  `release.yml` (cibuildwheel builds the abi3 wheel once and tests it on
+  3.13 and 3.14).
 
 ## [0.7.5] - 2026-11-03
 

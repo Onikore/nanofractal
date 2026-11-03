@@ -5,7 +5,10 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
-find_package(Python 3.9 COMPONENTS Interpreter Development.Module REQUIRED)
+# Development.SABIModule: the stable ABI (abi3) for Python 3.12+, one wheel
+# for 3.12, 3.13, 3.14 (measured: no change in call overhead or speed)
+find_package(Python 3.9 COMPONENTS Interpreter Development.Module
+             OPTIONAL_COMPONENTS Development.SABIModule REQUIRED)
 
 # Locate nanobind shipped with the build environment
 execute_process(
@@ -24,7 +27,7 @@ else()
   find_package(OpenCV REQUIRED COMPONENTS core imgproc calib3d features2d)
 endif()
 
-nanobind_add_module(_nanofractal NB_STATIC src/_bindings.cpp)
+nanobind_add_module(_nanofractal NB_STATIC STABLE_ABI src/_bindings.cpp)
 
 target_include_directories(_nanofractal PRIVATE
   "${CMAKE_SOURCE_DIR}/third_party"

@@ -46,6 +46,8 @@ bench = ["opencv-python>=4.5"]
 [tool.scikit-build]
 minimum-version = "0.10"
 build-dir = "build/{wheel_tag}"
+# Python 3.12+: one stable-ABI (abi3) wheel; older versions get their own.
+wheel.py-api = "cp312"
 wheel.packages = ["src/nanofractal"]
 cmake.build-type = "Release"
 
