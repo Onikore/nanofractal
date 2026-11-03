@@ -40,7 +40,7 @@ Changelog = "https://github.com/Onikore/nanofractal/blob/main/CHANGELOG.md"
 Issues = "https://github.com/Onikore/nanofractal/issues"
 
 [project.optional-dependencies]
-test = ["pytest>=7", "pytest-benchmark>=4", "pytest-cov>=4"]
+test = ["pytest>=7", "pytest-benchmark>=4", "pytest-cov>=4", "pytest-xdist>=3.2"]
 bench = ["opencv-python>=4.5"]
 
 [tool.scikit-build]

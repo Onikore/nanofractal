@@ -1,11 +1,17 @@
 name: ci
 
-# One workflow, one run (and one notification) per push. Lint goes first and
-# gates the rest; a newer push to the same branch cancels the run in progress.
-# The docs site (guide/ -> GitHub Pages) is built on every run and published
-# from main only.
-# Changes to notes only skip CI (README.md and guide/ are not skipped: their
-# Python examples are run by tests/test_guide.py).
+# One workflow, one run (and one notification) per push; all jobs start at
+# once and a newer push to the same branch cancels the run in progress. The
+# docs site (guide/ -> GitHub Pages) is built on every run and published from
+# main only. Changes to notes only skip CI (README.md and guide/ are not
+# skipped: their Python examples are run by tests/test_guide.py).
+#
+# Speed: compiled objects are cached across runs by sccache (the extension and
+# nanobind rebuild only what changed; builds use fixed paths -- no build
+# isolation, build-dir from pyproject.toml -- so the cache keys match), the
+# static OpenCV 5 and the apt packages of the system-OpenCV job are cached,
+# pip and pre-commit downloads are cached, and the tests run on every core
+# (pytest-xdist, work stealing).
 
 on:
   push:
@@ -48,6 +54,14 @@ permissions:
 
 env:
   OPENCV_VERSION: "5.0.0"
+  # sccache: compiler launcher for CMake (read from the environment), objects
+  # kept in the GitHub Actions cache
+  SCCACHE_GHA_ENABLED: "true"
+  CMAKE_C_COMPILER_LAUNCHER: sccache
+  CMAKE_CXX_COMPILER_LAUNCHER: sccache
+  # build requirements, installed once so builds need no isolated environment
+  BUILD_DEPS: "scikit-build-core>=0.10 nanobind>=2.1.0 cmake ninja"
+  PYTEST_ARGS: "-q -n auto --dist worksteal --ignore tests/test_benchmarks.py"
 
 jobs:
   lint:
@@ -58,25 +72,40 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: .pre-commit-config.yaml
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/pre-commit
+          key: pre-commit-${{ hashFiles('.pre-commit-config.yaml') }}
       - run: pip install pre-commit
       - run: pre-commit run --all-files
 
   test:
     name: test (system OpenCV 4, coverage)
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      # testing the distribution's OpenCV is the point of this job
-      - name: Install OpenCV dev headers
-        run: sudo apt-get update && sudo apt-get install -y libopencv-dev
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # testing the distribution's OpenCV is the point of this job; its
+      # packages are cached instead of downloaded from a mirror every run
+      - uses: awalsh128/cache-apt-pkgs-action@v1.6.3
+        with:
+          packages: libopencv-dev
+          version: "1"
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
       - name: Build and install
-        run: pip install -e ".[test]"
+        run: |
+          pip install $BUILD_DEPS
+          pip install --no-build-isolation -e ".[test]"
       - name: Run tests
-        run: python -m pytest tests -q --ignore tests/test_benchmarks.py --cov=nanofractal --cov-report=term-missing --cov-report=xml
+        run: python -m pytest tests $PYTEST_ARGS --cov=nanofractal --cov-report=term-missing --cov-report=xml
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
@@ -85,7 +114,6 @@ jobs:
 
   test-opencv5:
     name: test (static OpenCV 5, AVX2)
-    needs: lint
     runs-on: ubuntu-latest
     env:
       OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
@@ -95,6 +123,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.13"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
       # static OpenCV 5, shared by the jobs below (restored in ~1 s; apt takes
       # 0.5-7 min depending on the mirror)
       - name: Cache static OpenCV 5
@@ -105,17 +138,18 @@ jobs:
       - name: Build static OpenCV 5
         run: bash ci/build-opencv.sh
       - name: Build and install
-        run: pip install -e ".[test]"
+        run: |
+          pip install $BUILD_DEPS
+          pip install --no-build-isolation -e ".[test]"
         env:
           NF_MARCH: x86-64-v3
       - name: Check the linked OpenCV
         run: python -c "import nanofractal as nf; v = nf._opencv_version(); print(v); assert v.startswith('5.')"
       - name: Run tests
-        run: python -m pytest tests -q --ignore tests/test_benchmarks.py
+        run: python -m pytest tests $PYTEST_ARGS
 
   types:
     name: stubs (stubtest)
-    needs: lint
     runs-on: ubuntu-latest
     env:
       OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
@@ -125,6 +159,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
       - name: Cache static OpenCV 5
         uses: actions/cache@v4
         with:
@@ -133,13 +172,14 @@ jobs:
       - name: Build static OpenCV 5
         run: bash ci/build-opencv.sh
       - name: Build and install
-        run: pip install -e ".[test]" mypy
+        run: |
+          pip install $BUILD_DEPS mypy
+          pip install --no-build-isolation -e ".[test]"
       - name: Check stub freshness
         run: python -m mypy.stubtest nanofractal --allowlist tests/stubtest_allowlist.txt
 
   asan:
     name: ASan / UBSan
-    needs: lint
     runs-on: ubuntu-latest
     env:
       OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
@@ -149,6 +189,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
       - name: Cache static OpenCV 5
         uses: actions/cache@v4
         with:
@@ -158,7 +203,7 @@ jobs:
         run: bash ci/build-opencv.sh
       - name: Build with ASan / UBSan
         run: |
-          pip install scikit-build-core nanobind numpy pytest
+          pip install $BUILD_DEPS numpy pytest pytest-xdist
           pip install --no-build-isolation -C cmake.define.NF_SANITIZE=ON -e .
       - name: Run tests under sanitizers
         # libstdc++ is preloaded with libasan: ASan LD_PRELOAD-ed into a
@@ -166,22 +211,24 @@ jobs:
         # C++ exception (input validation throws constantly). detect_leaks=0:
         # LeakSanitizer is noise on a dlopened extension linked against a
         # non-instrumented OpenCV; overflow / use-after-free checks stay on.
+        # The workers inherit LD_PRELOAD and write reports to the job log.
         env:
           ASAN_OPTIONS: "detect_leaks=0:halt_on_error=1:abort_on_error=1"
           PYTHONMALLOC: "malloc"
         run: |
           LD_PRELOAD="$(gcc -print-file-name=libasan.so):$(gcc -print-file-name=libstdc++.so)" \
-            python -m pytest tests -q -s --ignore tests/test_benchmarks.py
+            python -m pytest tests $PYTEST_ARGS -s
 
   docs:
     name: docs site (mkdocs --strict)
-    needs: lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: mkdocs.yml
       # pinned: MkDocs 2.0 drops the plugin and theme system Material uses
       - run: pip install mkdocs==1.6.1 mkdocs-material==9.7.7
       - run: mkdocs build --strict -d site
@@ -193,7 +240,7 @@ jobs:
   pages:
     name: publish docs (GitHub Pages)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: [docs, test, test-opencv5]
+    needs: [lint, docs, test, test-opencv5]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -210,7 +257,6 @@ jobs:
     # three alternating rounds (drift of the runner hits both); fails when the
     # geometric mean of the cells is above x1.10 or one cell above x1.25.
     name: speed gate
-    needs: lint
     runs-on: ubuntu-latest
     env:
       OPENCV_CACHE_DIR: ${{ github.workspace }}/.opencv5
@@ -222,6 +268,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - uses: mozilla-actions/sccache-action@v0.0.11
+        with:
+          version: "v0.18.0"
       - name: Cache static OpenCV 5
         uses: actions/cache@v4
         with:
@@ -241,16 +292,22 @@ jobs:
           fi
           echo "BASE=$(git rev-parse "$base")" >> "$GITHUB_ENV"
           git log -1 --oneline "$base"
-      - name: Build base and new
+      - name: Build new and base
+        # Both in the checkout, one after the other: the base build has the
+        # paths the previous run's build had, so its objects come from sccache.
         run: |
-          git worktree add "$RUNNER_TEMP/base" "$BASE"
+          pip install $BUILD_DEPS
+          cp benchmarks/fractal_bench.py "$RUNNER_TEMP/"
+          pip wheel -q --no-build-isolation --no-deps -w "$RUNNER_TEMP/wn" .
+          git checkout -q "$BASE"
+          pip wheel -q --no-build-isolation --no-deps -w "$RUNNER_TEMP/wb" .
+          git checkout -q -
           python -m venv "$RUNNER_TEMP/vb" && python -m venv "$RUNNER_TEMP/vn"
-          "$RUNNER_TEMP/vb/bin/pip" install -q "$RUNNER_TEMP/base"
-          "$RUNNER_TEMP/vn/bin/pip" install -q .
+          "$RUNNER_TEMP/vb/bin/pip" install -q "$RUNNER_TEMP"/wb/*.whl
+          "$RUNNER_TEMP/vn/bin/pip" install -q "$RUNNER_TEMP"/wn/*.whl
       - name: Time both, alternating rounds
         # outside the checkout, so each venv imports its own build
         run: |
-          cp benchmarks/fractal_bench.py "$RUNNER_TEMP/"
           cd "$RUNNER_TEMP"
           args="run --threads 1 --modes detect --resolutions 640x480 1280x720 1920x1080 --min-time 1"
           for i in 1 2 3; do
@@ -261,3 +318,6 @@ jobs:
         run: |
           cd "$RUNNER_TEMP"
           vn/bin/python fractal_bench.py gate --base b1.json b2.json b3.json --new n1.json n2.json n3.json
+      - name: sccache statistics
+        if: always()
+        run: sccache --show-stats
