@@ -45,6 +45,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `release.yml` (cibuildwheel builds the abi3 wheel once and tests it on
   3.13 and 3.14).
 
+### Documentation
+- `ROADMAP.md` reorganised by release: what waits in `main` for 0.7.6, field
+  acceptance and the new marker for 0.8.0, API stability for 1.0, one table
+  of ideas measured and not taken, and a short history of the releases.
+
 ## [0.7.5] - 2026-11-03
 
 ### Changed
